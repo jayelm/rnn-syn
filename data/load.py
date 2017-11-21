@@ -81,7 +81,7 @@ def load_genx():
                 lf = sexpdata.loads(lf_str)
                 lf = simplify(lf)
                 if lf is None:
-                    print "warning: unable to parse", lf_str
+                    print("warning: unable to parse", lf_str)
                     continue
                 labels[ex_id].append(Label(sent, lf))
                 counter += 1
