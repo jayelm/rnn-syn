@@ -8,7 +8,6 @@ import numpy as np
 random = np.random.RandomState(1)
 
 COLORS = [
-    'black',
     'red',
     'green',
     'blue',
@@ -19,7 +18,8 @@ COLORS = [
 ]
 COLORS_MAP = {v: k for k, v in dict(enumerate(COLORS)).items()}
 
-NAMES = ['semicircle', 'circle', 'cross', 'pentagon', 'square', 'oval']
+NAMES = ['ellipse', 'pentagon', 'rectangle', 'semicircle',
+         'square', 'cross', 'circle', 'triangle']
 NAMES_MAP = {v: k for k, v in dict(enumerate(NAMES)).items()}
 
 Scene = namedtuple('Scene', ['images', 'target'])
@@ -40,11 +40,15 @@ def gen_scene(n_images, max_shapes, target='simple'):
     """Generate a single target/distractor scene."""
     images = [gen_random_shapes(max_shapes) for _ in range(n_images)]
     if target == 'simple':
-        # Super simple target: whichever one has more shapes
-        if len(images[0]) > len(images[1]):
-            target = 0
-        else:
+        # Super simple target: whichever image has the most shapes
+        target = max(enumerate(images), key=lambda t: len(t[1]))[0]
+    elif target == 'white':
+        n_white_0 = sum(i.color == 'white' for i in images[0])
+        n_white_1 = sum(i.color == 'white' for i in images[1])
+        if n_white_0 > n_white_1:
             target = 1
+        else:
+            target = 0
     else:
         raise NotImplementedError("Unknown target {}".format(target))
     return Scene(images=images, target=target)
