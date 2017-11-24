@@ -10,7 +10,7 @@ import swdata
 random = np.random.RandomState(0)
 
 # Task configuration
-N_IMAGES = 2
+N_IMAGES = 3
 MAX_SHAPES = 5
 
 # Model configuration
@@ -19,7 +19,12 @@ N_COMM = 64
 N_BATCH = 100
 
 
-def build_model(dataset, n_images, max_shapes, n_attrs):
+def build_feature_model(dataset, n_images, max_shapes, n_attrs):
+    """
+    Return an encoder-decoder model that uses the raw feature representation
+    of ShapeWorld microworlds for communication. This is exactly the model used
+    in Andreas and Klein (2017).
+    """
     # Each image represented as a max_shapes * n_attrs array
     n_image_features = max_shapes * n_attrs
     t_features = tf.placeholder(tf.float32,
@@ -50,6 +55,14 @@ def build_model(dataset, n_images, max_shapes, n_attrs):
     return t_features, t_labels, t_msg, t_pred, t_loss
 
 
+def build_end2end_model(dataset, n_images, max_shapes, n_attrs):
+    """
+    Return an encoder-decoder model that uses the raw ShapeWorld image data for
+    communication.
+    """
+    raise NotImplementedError
+
+
 if __name__ == "__main__":
     tf.set_random_seed(0)
 
@@ -58,7 +71,7 @@ if __name__ == "__main__":
     train = swdata.flatten_scenes(train)
     n_attrs = len(train[0].images[0][0])
 
-    t_features, t_labels, t_msg, t_pred, t_loss = build_model(
+    t_features, t_labels, t_msg, t_pred, t_loss = build_feature_model(
         train, N_IMAGES, MAX_SHAPES, n_attrs)
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
