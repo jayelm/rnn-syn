@@ -1,5 +1,9 @@
 # Compositional communication in end-to-end, multi-agent reference games
 
+Requires Python >= 3.4
+
+# rnn-syn
+
 To generate a spatial relations dataset:
 
 ```bash
