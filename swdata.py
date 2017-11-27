@@ -40,7 +40,7 @@ TEXTURES = ['solid']
 TEXTURES_MAP = invert(dict(enumerate(TEXTURES)))
 
 Scene = namedtuple('Scene', ['worlds', 'labels', 'relation', 'relation_dir'])
-SWorld = namedtuple('SWorld', ['image', 'shapes', 'caption'])
+SWorld = namedtuple('SWorld', ['image', 'shapes'])
 Shape = namedtuple('Shape',
                    ['name', 'color', 'size', 'center', 'rotation', 'texture'])
 Point = namedtuple('Point', ['x', 'y'])
@@ -71,8 +71,7 @@ def flatten_scene(scene):
     """Flatten a to make it tf-compatible"""
     new_worlds = [
         SWorld(image=s.image,
-               shapes=flatten_shapes(s.shapes),
-               caption=s.caption)
+               shapes=flatten_shapes(s.shapes))
         for s in scene.worlds
     ]
     return Scene(worlds=new_worlds, labels=scene.labels,
@@ -185,9 +184,9 @@ def sw_arr_to_img(swarr):
 def to_sworld(sw):
     """
     """
-    img, world_model, caption_model = sw
+    img, world_model = sw
     shapes = get_shapes(world_model)
-    return SWorld(image=img, shapes=shapes, caption=caption_model)
+    return SWorld(image=img, shapes=shapes)
 
 
 def get_shapes(world_model):
@@ -309,14 +308,12 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                     raise RuntimeError("No opposite referent! {} ({})".format(
                         cm, self.shapes))
                 elif sum(opps_is_target) > 1:
-                    # Both targets ambiguous
-                    #  print("Warning: both targets ambiguous:", cm)
-                    continue
+                    continue  # Both targets ambiguous
                 cap_target_i = opps_is_target.index(False)
             else:
                 cap_target_i = combs_is_target.index(True)
 
-            combined = ((img, wm, cm))
+            combined = ((img, wm))
             if self.relation_dir == cap_relation_dir:
                 if self.target_i == cap_target_i:
                     targets.append(combined)
