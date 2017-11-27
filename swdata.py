@@ -11,6 +11,7 @@ from shapeworld.world import World
 import os
 from tqdm import trange
 from PIL import Image
+from itertools import cycle
 
 random = np.random.RandomState()
 
@@ -35,14 +36,27 @@ NAMES = [
 ]
 NAMES_MAP = invert(dict(enumerate(NAMES)))
 
-Scene = namedtuple('Scene', ['images', 'target'])
-Shape = namedtuple('Shape', ['name', 'color', 'size', 'center', 'rotation'])
-Point = namedtuple('Point', ['x', 'y'])
-
 TEXTURES = ['solid']
 TEXTURES_MAP = invert(dict(enumerate(TEXTURES)))
 
+Scene = namedtuple('Scene', ['targets', 'distractors'])
+SWorld = namedtuple('SWorld', ['image', 'shapes', 'caption'])
+Shape = namedtuple('Shape',
+                   ['name', 'color', 'size', 'center', 'rotation', 'texture'])
+Point = namedtuple('Point', ['x', 'y'])
+Color = namedtuple('Color', ['color', 'shade'])
+
 RELATIONS = ['x-rel', 'y-rel']
+
+
+def max_scenes(len_targets, len_distractors, n_targets, n_distractors):
+    """
+    How many scenes can be constructed with the given distractor/target
+    count?
+    """
+    max_target_scenes = len_targets // n_targets
+    max_distractor_scenes = len_distractors // n_distractors
+    return min(max_target_scenes, max_distractor_scenes)
 
 
 def comp_obj(entity_model, obj):
@@ -53,57 +67,21 @@ def comp_obj(entity_model, obj):
     return True
 
 
-def gen_example_data(n, n_images=2, max_shapes=5, target='simple'):
-    """
-    Generate a list of Scenes
-    where `target` is either 0 or 1 and image{1,2} is a list of Shapes.
-    """
-    return [gen_scene(n_images, max_shapes, target=target) for _ in range(n)]
-
-
-def gen_scene(n_images, max_shapes, target='simple'):
-    """Generate a single target/distractor scene."""
-    images = [gen_random_shapes(max_shapes) for _ in range(n_images)]
-    if target == 'simple':
-        # Super simple target: whichever image has the most shapes
-        target = max(enumerate(images), key=lambda t: len(t[1]))[0]
-    elif target == 'white':
-        n_white_0 = sum(i.color == 'white' for i in images[0])
-        n_white_1 = sum(i.color == 'white' for i in images[1])
-        if n_white_0 > n_white_1:
-            target = 1
-        else:
-            target = 0
-    else:
-        raise NotImplementedError("Unknown target {}".format(target))
-    return Scene(images=images, target=target)
-
-
-def gen_random_shapes(max_shapes):
-    """Generate a list of random shapes."""
-    n_items = random.randint(max_shapes) + 1
-    return [gen_random_shape() for _ in range(n_items)]
-
-
-def gen_random_shape():
-    """Generate a random shape."""
-    return Shape(
-        name=random.choice(NAMES),
-        color=random.choice(COLORS),
-        size=random_point(),
-        center=random_point(),
-        rotation=random.rand())
-
-
-def flatten_scenes(scenes):
-    """Flatten shapes in scenes"""
-    return list(map(flatten_scene, scenes))
-
-
 def flatten_scene(scene):
     """Flatten a to make it tf-compatible"""
-    return Scene(
-        images=list(map(flatten_shapes, scene.images)), target=scene.target)
+    new_targets = [
+        SWorld(image=s.image,
+               shapes=flatten_shapes(s.shapes),
+               caption=s.caption)
+        for s in scene.targets
+    ]
+    new_distractors = [
+        SWorld(image=s.image,
+               shapes=flatten_shapes(s.shapes),
+               caption=s.caption)
+        for s in scene.distractors
+    ]
+    return Scene(targets=new_targets, distractors=new_distractors)
 
 
 def flatten_shapes(shapes):
@@ -115,12 +93,14 @@ def flatten_shape(shape):
     names_onehot = [0 for _ in NAMES]
     names_onehot[NAMES_MAP[shape.name]] = 1
     colors_onehot = [0 for _ in COLORS]
-    colors_onehot[COLORS_MAP[shape.color]] = 1
+    colors_onehot[COLORS_MAP[shape.color.color]] = 1
+    textures_onehot = [0 for _ in TEXTURES]
+    textures_onehot[TEXTURES_MAP[shape.texture]] = 1
     reals = [
-        shape.size.x, shape.size.y, shape.center.x, shape.center.y,
-        shape.rotation
+        shape.color.shade, shape.size.x, shape.size.y, shape.center.x,
+        shape.center.y, shape.rotation
     ]
-    return names_onehot + colors_onehot + reals
+    return names_onehot + colors_onehot + textures_onehot + reals
 
 
 def random_point():
@@ -215,6 +195,30 @@ def sw_arr_to_img(swarr):
     return Image.fromarray(np.uint8(swarr * 255))
 
 
+def to_sworld(sw):
+    """
+    """
+    img, world_model, caption_model = sw
+    shapes = get_shapes(world_model)
+    return SWorld(image=img, shapes=shapes, caption=caption_model)
+
+
+def get_shapes(world_model):
+    shapes = []
+    for shape_model in world_model['entities']:
+        shape = Shape(
+            name=shape_model['shape']['name'],
+            color=Color(color=shape_model['color']['name'],
+                        shade=shape_model['color']['shade']),
+            size=Point(**shape_model['shape']['size']),
+            center=Point(**shape_model['center']),
+            rotation=shape_model['rotation'],
+            texture=shape_model['texture']['name']
+        )
+        shapes.append(shape)
+    return shapes
+
+
 class SpatialExtraSimple(CaptionAgreementDataset):
     """
     A dataset that generates target/distractor pairs with common objects and
@@ -303,7 +307,6 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         for img, wm, cm in zip(sw_data['world'],
                                sw_data['world_model'],
                                sw_data['caption_model']):
-            img = sw_arr_to_img(img)
 
             cap_target = cm['restrictor']['value']
             cap_relation_dir = cm['body']['value']
@@ -341,22 +344,43 @@ class SpatialExtraSimple(CaptionAgreementDataset):
 
         return targets, distractors
 
-    def generate(self, max, noise_range=0.0, n_distractors=1):
+    def generate(self, max, noise_range=0.0,
+                 n_targets=2,
+                 n_distractors=1):
         targets, distractors = self.generate_targets_distractors(
             max, noise_range=noise_range)
         return self.combine_targets_distractors(
-            targets, distractors, n_distractors=n_distractors)
+            targets, distractors,
+            n_targets=n_targets, n_distractors=n_distractors)
 
     def combine_targets_distractors(self,
                                     targets,
                                     distractors,
-                                    n_distractors=2):
-        return targets, distractors
+                                    n_targets=2,
+                                    n_distractors=1):
+        n_scenes = max_scenes(len(targets), len(distractors),
+                              n_targets, n_distractors)
 
-    def to_html(self, targets, distractors, save_dir='test'):
+        scenes = []
+        for scene_i in range(n_scenes):
+            scene_targets = [targets.pop() for _ in range(n_targets)]
+            scene_distractors = [distractors.pop()
+                                 for _ in range(n_distractors)]
+            random.shuffle(scene_targets)
+            random.shuffle(scene_distractors)
+
+            scene_targets = list(map(to_sworld, scene_targets))
+            scene_distractors = list(map(to_sworld, scene_distractors))
+
+            scene = Scene(targets=scene_targets, distractors=scene_distractors)
+            scene = flatten_scene(scene)
+            scenes.append(scene)
+
+        return scenes
+
+    def to_html(self, scenes, save_dir='test'):
         """
-        TODO: change this so that it accepts the combined 3way
-        images
+        Save images as bmps and html index to save_dir
         """
         html_str = """
             <!DOCTYPE html>
@@ -364,8 +388,20 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                 <head>
                     <title>temp</title>
                     <style>
-                    img {
-                        margin: 5px;
+                    .scene {
+                        display: block;
+                        margin-top: 20px;
+                        margin-bottom: 20px;
+                    }
+                    .target {
+                        display: inline-block;
+                        padding: 10px;
+                        background-color: #99ff99;
+                    }
+                    .distractor {
+                        display: inline-block;
+                        padding: 10px;
+                        background-color: #ff9999;
                     }
                     </style>
                 </head>
@@ -381,20 +417,27 @@ class SpatialExtraSimple(CaptionAgreementDataset):
             target_obj_str, self.relation,
             self.relation_dir, 'A {} is {} a {}'.format(
                 target_obj_str, relation_str_nice, opp_obj_str))
-        html_str += "<h1>Targets</h1>"
 
-        for i, world in enumerate(targets):
-            img, world, cm = world
-            world_name = 'world-{}-target.bmp'.format(i)
-            html_str += "<img src={}></img>".format(world_name)
-            img.save(os.path.join(save_dir, world_name))
+        global_i = 0
+        for i, scene in enumerate(scenes):
+            html_str += "<div class='scene' id='{}'>".format(i)
+            tds = (list(zip(scene.targets, cycle(['target']))) +
+                   list(zip(scene.distractors, cycle(['distractor']))))
+            random.shuffle(tds)
 
-        html_str += "<h1>Distractors</h1>"
-        for i, world in enumerate(distractors):
-            img, world, cm = world
-            world_name = 'world-{}-distractor.bmp'.format(i)
-            html_str += "<img src={}></img>".format(world_name)
-            img.save(os.path.join(save_dir, world_name))
+            for sw_i, swlabel in enumerate(tds):
+                sw, label = swlabel
+                # Save image
+                img = sw_arr_to_img(sw.image)
+                world_name = 'world-{}-{}.bmp'.format(global_i, label)
+                global_i += 1
+                img.save(os.path.join(save_dir, world_name))
+
+                # Add link to html with given class
+                html_str += """
+                    <div class='{}'><img src='{}'></img></div>
+                """.format(label, world_name)
+            html_str += "</div>"
 
         html_str += "</body></html>"
 
@@ -422,5 +465,5 @@ if __name__ == "__main__":
 
     for _ in trange(args.n):
         dataset = SpatialExtraSimple()
-        targets, distractors = dataset.generate(args.each)
-        dataset.to_html(targets, distractors, save_dir='test')
+        train = dataset.generate(args.each)
+        dataset.to_html(train, save_dir='test')
