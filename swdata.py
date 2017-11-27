@@ -39,7 +39,7 @@ NAMES_MAP = invert(dict(enumerate(NAMES)))
 TEXTURES = ['solid']
 TEXTURES_MAP = invert(dict(enumerate(TEXTURES)))
 
-Scene = namedtuple('Scene', ['targets', 'distractors'])
+Scene = namedtuple('Scene', ['worlds', 'labels', 'relation', 'relation_dir'])
 SWorld = namedtuple('SWorld', ['image', 'shapes', 'caption'])
 Shape = namedtuple('Shape',
                    ['name', 'color', 'size', 'center', 'rotation', 'texture'])
@@ -69,19 +69,15 @@ def comp_obj(entity_model, obj):
 
 def flatten_scene(scene):
     """Flatten a to make it tf-compatible"""
-    new_targets = [
+    new_worlds = [
         SWorld(image=s.image,
                shapes=flatten_shapes(s.shapes),
                caption=s.caption)
-        for s in scene.targets
+        for s in scene.worlds
     ]
-    new_distractors = [
-        SWorld(image=s.image,
-               shapes=flatten_shapes(s.shapes),
-               caption=s.caption)
-        for s in scene.distractors
-    ]
-    return Scene(targets=new_targets, distractors=new_distractors)
+    return Scene(worlds=new_worlds, labels=scene.labels,
+                 relation=scene.relation,
+                 relation_dir=scene.relation_dir)
 
 
 def flatten_shapes(shapes):
@@ -103,15 +99,6 @@ def flatten_shape(shape):
     return names_onehot + colors_onehot + textures_onehot + reals
 
 
-def random_point():
-    return Point(x=random.rand(), y=random.rand())
-
-
-def most_items(scene):
-    """Given a Scene, return the max number of items in an image"""
-    return max(map(len, scene.images))
-
-
 def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs):
     """
     Given a list of scenes, return a list of tf-compatible feature reps and
@@ -120,17 +107,17 @@ def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs):
     n_scenes = len(scenes)
 
     envs = np.zeros((n_scenes, n_images, max_shapes * n_attrs))
-    for scene_i, scene in enumerate(scenes):
-        for image_i, image in enumerate(scene.images):
-            global_shape_i = 0
-            for shape in image:
-                for shape_prop in shape:
-                    envs[scene_i, image_i, global_shape_i] = shape_prop
-                    global_shape_i += 1
-
     labels = np.zeros((n_scenes, n_images))
+
     for scene_i, scene in enumerate(scenes):
-        labels[scene_i, scene.target] = 1
+        for world_i, wl in enumerate(zip(scene.worlds, scene.labels)):
+            world, label = wl
+            global_shape_i = 0
+            for shape in world.shapes:
+                for shape_prop in shape:
+                    envs[scene_i, world_i, global_shape_i] = shape_prop
+                    global_shape_i += 1
+            labels[scene_i, world_i] = label
 
     return envs, labels
 
@@ -322,7 +309,8 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                     raise RuntimeError("No opposite referent! {} ({})".format(
                         cm, self.shapes))
                 elif sum(opps_is_target) > 1:
-                    print("Warning: both targets ambiguous:", cm)
+                    # Both targets ambiguous
+                    #  print("Warning: both targets ambiguous:", cm)
                     continue
                 cap_target_i = opps_is_target.index(False)
             else:
@@ -363,16 +351,19 @@ class SpatialExtraSimple(CaptionAgreementDataset):
 
         scenes = []
         for scene_i in range(n_scenes):
-            scene_targets = [targets.pop() for _ in range(n_targets)]
-            scene_distractors = [distractors.pop()
+            scene_targets = [(targets.pop(), 1)
+                             for _ in range(n_targets)]
+            scene_distractors = [(distractors.pop(), 0)
                                  for _ in range(n_distractors)]
-            random.shuffle(scene_targets)
-            random.shuffle(scene_distractors)
 
-            scene_targets = list(map(to_sworld, scene_targets))
-            scene_distractors = list(map(to_sworld, scene_distractors))
+            combs = scene_targets + scene_distractors
+            random.shuffle(combs)
+            sworlds, labels = zip(*combs)
+            sworlds = list(map(to_sworld, sworlds))
 
-            scene = Scene(targets=scene_targets, distractors=scene_distractors)
+            scene = Scene(worlds=sworlds, labels=np.array(labels),
+                          relation=self.relation,
+                          relation_dir=self.relation_dir)
             scene = flatten_scene(scene)
             scenes.append(scene)
 
@@ -421,22 +412,20 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         global_i = 0
         for i, scene in enumerate(scenes):
             html_str += "<div class='scene' id='{}'>".format(i)
-            tds = (list(zip(scene.targets, cycle(['target']))) +
-                   list(zip(scene.distractors, cycle(['distractor']))))
-            random.shuffle(tds)
 
-            for sw_i, swlabel in enumerate(tds):
+            for sw_i, swlabel in enumerate(zip(scene.worlds, scene.labels)):
                 sw, label = swlabel
+                label_str = 'target' if label else 'distractor'
                 # Save image
                 img = sw_arr_to_img(sw.image)
-                world_name = 'world-{}-{}.bmp'.format(global_i, label)
+                world_name = 'world-{}-{}.bmp'.format(global_i, label_str)
                 global_i += 1
                 img.save(os.path.join(save_dir, world_name))
 
                 # Add link to html with given class
                 html_str += """
                     <div class='{}'><img src='{}'></img></div>
-                """.format(label, world_name)
+                """.format(label_str, world_name)
             html_str += "</div>"
 
         html_str += "</body></html>"

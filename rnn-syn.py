@@ -7,6 +7,11 @@ import tensorflow as tf
 import numpy as np
 import swdata
 
+# Message analysis
+from sklearn.decomposition import PCA
+from matplotlib import pyplot as plt
+import seaborn as sns
+
 random = np.random.RandomState(0)
 
 # Task configuration
@@ -49,7 +54,7 @@ def build_feature_model(dataset, n_images, max_shapes, n_attrs):
     t_pred = tf.squeeze(
         net.mlp(t_out_feats, (N_HIDDEN, 1), (tf.nn.relu, None)))
     t_loss = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits(
+        tf.nn.sigmoid_cross_entropy_with_logits(
             labels=t_labels, logits=t_pred))
 
     return t_features, t_labels, t_msg, t_pred, t_loss
@@ -64,15 +69,31 @@ def build_end2end_model(dataset, n_images, max_shapes, n_attrs):
 
 
 if __name__ == "__main__":
-    tf.set_random_seed(0)
+    #  tf.set_random_seed(0)
 
-    train = swdata.gen_example_data(10000, n_images=N_IMAGES,
-                                    max_shapes=MAX_SHAPES, target='simple')
-    train = swdata.flatten_scenes(train)
-    n_attrs = len(train[0].images[0][0])
+    N_TARGETS = 2
+    N_DISTRACTORS = 1
+    MAX_IMAGES = N_TARGETS + N_DISTRACTORS
+    MAX_SHAPES = 2
 
+    N_CONFIGS = 15
+    SAMPLES_EACH_CONFIG = 200
+
+    print("Generating data")
+    train = []
+    for n in range(N_CONFIGS):
+        dataset = swdata.SpatialExtraSimple()
+        print(dataset.relation, dataset.relation_dir)
+        train.extend(
+            dataset.generate(SAMPLES_EACH_CONFIG,
+                             n_targets=N_TARGETS,
+                             n_distractors=N_DISTRACTORS))
+
+    n_attrs = len(train[0].worlds[0].shapes[0])
+
+    print("Building model")
     t_features, t_labels, t_msg, t_pred, t_loss = build_feature_model(
-        train, N_IMAGES, MAX_SHAPES, n_attrs)
+        train, MAX_IMAGES, MAX_SHAPES, n_attrs)
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
     session = tf.Session()
@@ -82,6 +103,7 @@ if __name__ == "__main__":
     acc_history = []
     loss_history = []
 
+    print("Training")
     for epoch in range(10):
         loss = 0
         hits = 0
@@ -89,19 +111,38 @@ if __name__ == "__main__":
         for t in range(100):
             train_scenes = [train[random.randint(len(train))]
                             for _ in range(N_BATCH)]
+            #  import ipdb; ipdb.set_trace()
             envs, labels = swdata.extract_envs_and_labels(
-                train_scenes, N_IMAGES, MAX_SHAPES, n_attrs)
+                train_scenes, MAX_IMAGES, MAX_SHAPES, n_attrs)
             l, preds, _ = session.run(
                     [t_loss, t_pred, o_train],
                     {t_features: envs, t_labels: labels})
-            binary_labels = np.where(labels)[1]
-            binary_preds = np.argmax(preds, axis=1)
+
+            match = (preds > 0) == labels
             loss += l
-            hits += sum(binary_labels == binary_preds)
-            total += len(binary_labels)
+            hits += np.all(match, axis=1).sum()
+            total += len(match)
 
         acc = hits / total
         print("Epoch {}: Accuracy {}".format(epoch, acc))
 
         loss_history.append(loss)
         acc_history.append(acc)
+
+    all_envs, all_labels = swdata.extract_envs_and_labels(
+        train, MAX_IMAGES, MAX_SHAPES, n_attrs)
+    all_msgs, all_preds = session.run(
+            [t_msg, t_pred],
+            {t_features: all_envs, t_labels: all_labels})
+    msg_projs = PCA(2).fit_transform(all_msgs)
+    sns.set_style('white')
+    colors = None
+    rels = list(map(lambda x: (x.relation, x.relation_dir), train))
+    rels_unique = list(set(rels))
+    rels_color_map = dict(zip(rels_unique,
+                              ['red', 'green', 'blue', 'orange']))
+    colors = [rels_color_map[rel] for rel in rels]
+
+    plt.scatter(msg_projs[:, 0], msg_projs[:, 1], c=colors,
+                s=25, linewidth=2)
+    plt.show()
