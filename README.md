@@ -2,7 +2,7 @@
 
 To generate a spatial relations dataset:
 
-```python
+```bash
 python rnn-syn.py --no_train --n_configs 15 --samples_each_config 100 \
     --n_targets 2 --n_distractors 1 --n_cpu 1
 ```
@@ -14,7 +14,7 @@ creates a gzipped pickle in
 
 then run
 
-```python
+```pythonbash
 python rnn-syn.py --load_dataset data/365-15-100-2t-1d.pkl.gz
 ```
 
