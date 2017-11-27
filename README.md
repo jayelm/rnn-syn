@@ -1,10 +1,22 @@
-Code for the paper
+# Compositional communication in end-to-end, multi-agent reference games
 
-> Analogs of linguistic structure in deep representations. Jacob Andreas and Dan
-> Klein. EMNLP 2017. http://arxiv.org/abs/1707.08139
+To generate a spatial relations dataset:
 
-All the experiments from the paper are in
-[rnn-syn.ipnb](https://github.com/jacobandreas/rnn-syn/blob/master/rnn-syn.ipynb).
+```python
+python rnn-syn.py --no_train --n_configs 15 --samples_each_config 100 \
+    --n_targets 2 --n_distractors 1 --n_cpu 1
+```
 
-Data is from the [GenX corpus](https://bitbucket.org/nfitzgerald/genx-referring-expression-corpus)
-produced by [FitzGerald](http://nfitz.net/) et al.
+creates a gzipped pickle in
+`data/{num_scenes}-{num_configs}-{samples_each_config}-{n_targets}t-{n_distractors}d.pkl.gz` by default.
+
+(the above numbers are the default values of the relevant options).
+
+then run
+
+```python
+python rnn-syn.py --load_dataset data/365-15-100-2t-1d.pkl.gz
+```
+
+You can also generate datasets on-the-fly in `rnn-syn` by omitting
+`--load_dataset`, but this takes longer.

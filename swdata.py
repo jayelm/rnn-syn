@@ -11,7 +11,9 @@ from shapeworld.world import World
 import os
 from tqdm import trange
 from PIL import Image
-from itertools import cycle
+import pickle
+import gzip
+
 
 random = np.random.RandomState()
 
@@ -49,6 +51,20 @@ Color = namedtuple('Color', ['color', 'shade'])
 RELATIONS = ['x-rel', 'y-rel']
 
 
+def pickle_scenes(scenes, save_file='data/dataset.pkl', gz=True):
+    dirs, fname = os.path.split(save_file)
+    os.makedirs(dirs, exist_ok=True)
+    opener = gzip.open if gz else open
+    with opener(save_file, 'wb') as fout:
+        pickle.dump(scenes, fout, protocol=-1)
+
+
+def load_scenes(fname, gz=True):
+    opener = gzip.open if gz else open
+    with opener(fname, 'rb') as fin:
+        return pickle.load(fin)
+
+
 def max_scenes(len_targets, len_distractors, n_targets, n_distractors):
     """
     How many scenes can be constructed with the given distractor/target
@@ -80,7 +96,8 @@ def flatten_scene(scene):
 
 
 def flatten_shapes(shapes):
-    return list(map(flatten_shape, shapes))
+    return np.array(list(map(flatten_shape, shapes)),
+                    dtype=np.float32)
 
 
 def flatten_shape(shape):
@@ -95,7 +112,8 @@ def flatten_shape(shape):
         shape.color.shade, shape.size.x, shape.size.y, shape.center.x,
         shape.center.y, shape.rotation
     ]
-    return names_onehot + colors_onehot + textures_onehot + reals
+    return np.array(names_onehot + colors_onehot + textures_onehot + reals,
+                    dtype=np.float32)
 
 
 def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs):
@@ -370,6 +388,8 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         """
         Save images as bmps and html index to save_dir
         """
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
         html_str = """
             <!DOCTYPE html>
             <html>
@@ -453,3 +473,5 @@ if __name__ == "__main__":
         dataset = SpatialExtraSimple()
         train = dataset.generate(args.each)
         dataset.to_html(train, save_dir='test')
+        pickle_scenes(train, save_file='test/test.pkl.gz')
+        train2 = load_scenes('test/test.pkl.gz')
