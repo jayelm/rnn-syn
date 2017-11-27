@@ -8,6 +8,8 @@ import numpy as np
 import swdata
 import multiprocessing as mp
 import os
+import sys
+from itertools import cycle
 
 # Message analysis
 from sklearn.decomposition import PCA
@@ -66,11 +68,19 @@ def build_end2end_model(dataset, n_images, max_shapes, n_attrs):
     raise NotImplementedError
 
 
-def gen_dataset(args):
+def gen_dataset(iargs):
+    i, args = iargs
+    if i is not None:
+        print("{} Started".format(i))
+        sys.stdout.flush()
     max_n, n_targets, n_distractors = args
     dataset = swdata.SpatialExtraSimple()
-    return dataset.generate(
+    train = dataset.generate(
         max_n, n_targets=n_targets, n_distractors=n_distractors)
+    if i is not None:
+        print("{} Finished".format(i))
+        sys.stdout.flush()
+    return train
 
 
 def batches(train, batch_size, max_data=None):
@@ -90,7 +100,6 @@ def batches(train, batch_size, max_data=None):
 
 if __name__ == "__main__":
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    import sys
 
     parser = ArgumentParser(
         description='rnn-syn', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -149,10 +158,14 @@ if __name__ == "__main__":
         default='saves/rnn-syn-model',
         help='Restore filepath')
     train_opts.add_argument(
+        '--save',
+        action='store_true',
+        help='Save model file')
+    train_opts.add_argument(
         '--save_path',
         type=str,
         default='saves/rnn-syn-model',
-        help='Save model file')
+        help='Save model filepath')
     train_opts.add_argument(
         '--tf_seed', type=int, default=None, help='Random TensorFlow seed')
     train_opts.add_argument(
@@ -181,10 +194,11 @@ if __name__ == "__main__":
         dataset_args = [(args.samples_each_config, args.n_targets,
                          args.n_distractors) for _ in range(args.n_configs)]
         if args.n_cpu == 1:  # Non-mp
-            dataset_iter = map(gen_dataset, dataset_args)
+            dataset_iter = map(gen_dataset,
+                               list(zip(cycle([None]), dataset_args)))
         else:
             pool = mp.Pool(args.n_cpu)
-            dataset_iter = pool.map(gen_dataset, dataset_args)
+            dataset_iter = pool.map(gen_dataset, list(enumerate(dataset_args)))
             pool.close()
             pool.join()
 
@@ -257,8 +271,9 @@ if __name__ == "__main__":
             loss_history.append(loss)
             acc_history.append(acc)
 
-        saver = tf.train.Saver()
-        saver.save(session, args.save_path)
+        if args.save:
+            saver = tf.train.Saver()
+            saver.save(session, args.save_path)
 
     all_envs, all_labels = swdata.extract_envs_and_labels(
         train, max_images, max_shapes, n_attrs)
