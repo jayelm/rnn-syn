@@ -300,8 +300,9 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         targets = []
         distractors = []
 
-        for imgcm in zip(sw_data['world'], sw_data['caption_model']):
-            img, cm = imgcm
+        for img, wm, cm in zip(sw_data['world'],
+                               sw_data['world_model'],
+                               sw_data['caption_model']):
             img = sw_arr_to_img(img)
 
             cap_target = cm['restrictor']['value']
@@ -324,18 +325,19 @@ class SpatialExtraSimple(CaptionAgreementDataset):
             else:
                 cap_target_i = combs_is_target.index(True)
 
+            combined = ((img, wm, cm))
             if self.relation_dir == cap_relation_dir:
                 if self.target_i == cap_target_i:
-                    targets.append((img, cm))
+                    targets.append(combined)
                 else:
-                    distractors.append((img, cm))
+                    distractors.append(combined)
             else:
                 # Since the relation direction is flipped,
                 # the targets are flipped
                 if self.target_i == cap_target_i:
-                    distractors.append((img, cm))
+                    distractors.append(combined)
                 else:
-                    targets.append((img, cm))
+                    targets.append(combined)
 
         return targets, distractors
 
@@ -382,14 +384,14 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         html_str += "<h1>Targets</h1>"
 
         for i, world in enumerate(targets):
-            img, cm = world
+            img, world, cm = world
             world_name = 'world-{}-target.bmp'.format(i)
             html_str += "<img src={}></img>".format(world_name)
             img.save(os.path.join(save_dir, world_name))
 
         html_str += "<h1>Distractors</h1>"
         for i, world in enumerate(distractors):
-            img, cm = world
+            img, world, cm = world
             world_name = 'world-{}-distractor.bmp'.format(i)
             html_str += "<img src={}></img>".format(world_name)
             img.save(os.path.join(save_dir, world_name))
