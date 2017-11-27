@@ -311,10 +311,18 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                 raise RuntimeError("No compatible referent! {} ({})".format(
                     cm, self.shapes))
             elif sum(combs_is_target) > 1:
-                # Ambiguous referent, skip
-                continue
-
-            cap_target_i = combs_is_target.index(True)
+                # Ambiguous referent
+                opp_target = cm['body']['reference']['value']
+                opps_is_target = [comp_obj(opp_target, c) for c in self.shapes]
+                if sum(opps_is_target) == 0:
+                    raise RuntimeError("No opposite referent! {} ({})".format(
+                        cm, self.shapes))
+                elif sum(opps_is_target) > 1:
+                    print("Warning: both targets ambiguous:", cm)
+                    continue
+                cap_target_i = opps_is_target.index(False)
+            else:
+                cap_target_i = combs_is_target.index(True)
 
             if self.relation_dir == cap_relation_dir:
                 if self.target_i == cap_target_i:
@@ -331,7 +339,7 @@ class SpatialExtraSimple(CaptionAgreementDataset):
 
         return targets, distractors
 
-    def generate(self, max, noise_range=0.0, n_distractors=2):
+    def generate(self, max, noise_range=0.0, n_distractors=1):
         targets, distractors = self.generate_targets_distractors(
             max, noise_range=noise_range)
         return self.combine_targets_distractors(
