@@ -10,6 +10,7 @@ import multiprocessing as mp
 import os
 import sys
 from itertools import cycle
+import time
 
 
 random = np.random.RandomState(0)
@@ -67,6 +68,7 @@ def build_end2end_model(dataset, n_images, max_shapes, n_attrs):
 def gen_dataset(iargs):
     i, args = iargs
     if i is not None:
+        t = time.time()
         print("{} Started".format(i))
         sys.stdout.flush()
     max_n, n_targets, n_distractors = args
@@ -74,7 +76,7 @@ def gen_dataset(iargs):
     train = dataset.generate(
         max_n, n_targets=n_targets, n_distractors=n_distractors)
     if i is not None:
-        print("{} Finished".format(i))
+        print("{} Finished ({}s)".format(i, round(time.time() - t, 2)))
         sys.stdout.flush()
     return train
 
@@ -193,10 +195,13 @@ if __name__ == "__main__":
             dataset_iter = map(gen_dataset,
                                list(zip(cycle([None]), dataset_args)))
         else:
+            t = time.time()
+            print("Multiprocessing")
             pool = mp.Pool(args.n_cpu)
             dataset_iter = pool.map(gen_dataset, list(enumerate(dataset_args)))
             pool.close()
             pool.join()
+            print("Elapsed time: {}s".format(round(time.time() - t, 2)))
 
         train = []
         for train_subset in dataset_iter:

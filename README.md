@@ -7,6 +7,7 @@ Requires Python >= 3.4
 To generate a spatial relations dataset:
 
 ```bash
+# Estimate 0.1 seconds per sample per config, split among the cores
 python rnn-syn.py --no_train --n_configs 15 --samples_each_config 100 \
     --n_targets 2 --n_distractors 1 --n_cpu 1
 ```
