@@ -11,10 +11,6 @@ import os
 import sys
 from itertools import cycle
 
-# Message analysis
-from sklearn.decomposition import PCA
-from matplotlib import pyplot as plt
-import seaborn as sns
 
 random = np.random.RandomState(0)
 
@@ -274,20 +270,3 @@ if __name__ == "__main__":
         if args.save:
             saver = tf.train.Saver()
             saver.save(session, args.save_path)
-
-    all_envs, all_labels = swdata.extract_envs_and_labels(
-        train, max_images, max_shapes, n_attrs)
-    all_msgs, all_preds = session.run([t_msg, t_pred], {
-        t_features: all_envs,
-        t_labels: all_labels
-    })
-    msg_projs = PCA(2).fit_transform(all_msgs)
-    sns.set_style('white')
-    colors = None
-    rels = list(map(lambda x: (x.relation, x.relation_dir), train))
-    rels_unique = list(set(rels))
-    rels_color_map = dict(zip(rels_unique, ['red', 'green', 'blue', 'orange']))
-    colors = [rels_color_map[rel] for rel in rels]
-
-    plt.scatter(msg_projs[:, 0], msg_projs[:, 1], c=colors, s=25, linewidth=2)
-    plt.show()
