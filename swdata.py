@@ -22,6 +22,7 @@ import gzip
 from itertools import cycle
 import time
 import multiprocessing as mp
+import subprocess
 
 
 random = np.random.RandomState()
@@ -570,15 +571,24 @@ if __name__ == "__main__":
         '--verify_load',
         action='store_true',
         help='Verify data by reloading it')
+    parser.add_argument(
+        '--compress',
+        action='store_true',
+        help='Compress (tar.gz) data after generating')
 
     args = parser.parse_args()
 
     # Check save folder.
     save_folder = args.save_folder.format(**vars(args))
     if os.path.exists(save_folder):
-        overwrite_msg = 'Overwrite {}? [y/N] '.format(save_folder)
+        overwrite_msg = (
+            'Overwrite {} and .tar.gz, if exists? [y/N] '.format(save_folder)
+        )
         if args.overwrite or input(overwrite_msg).lower().startswith('y'):
             shutil.rmtree(save_folder)
+            poss_targz = save_folder + '.tar.gz'
+            if os.path.exists(poss_targz):
+                os.remove(poss_targz)
         else:
             print("Exiting")
             sys.exit(0)
@@ -624,3 +634,10 @@ if __name__ == "__main__":
         except Exception as e:
             print("\nDataset verification failed:\n")
             raise
+
+    if args.compress:
+        print("Compressing")
+        up_to_sf, sf = os.path.split(os.path.normpath(save_folder))
+        subprocess.check_output(
+            ['tar', '-czf', save_folder + '.tar.gz',
+             '-C', up_to_sf, sf])
