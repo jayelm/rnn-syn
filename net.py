@@ -2,6 +2,7 @@ import tensorflow as tf
 
 INIT_SCALE = 1.47
 
+
 def linear(t_in, n_out):
     if len(t_in.get_shape()) == 2:
         op = "ij,jk->ik"
@@ -10,20 +11,20 @@ def linear(t_in, n_out):
     else:
         assert False
     v_w = tf.get_variable(
-            "w",
-            shape=(t_in.get_shape()[-1], n_out),
-            initializer=tf.uniform_unit_scaling_initializer(
-                factor=INIT_SCALE))
+        "w",
+        shape=(t_in.get_shape()[-1], n_out),
+        initializer=tf.initializers.variance_scaling(
+            scale=INIT_SCALE, distribution='uniform'))
     v_b = tf.get_variable(
-            "b",
-            shape=n_out,
-            initializer=tf.constant_initializer(0))
+        "b", shape=n_out, initializer=tf.constant_initializer(0))
     return tf.einsum(op, t_in, v_w) + v_b
+
 
 def embed(t_in, n_embeddings, n_out):
     v = tf.get_variable(
-            "embed", shape=(n_embeddings, n_out),
-            initializer=tf.uniform_unit_scaling_initializer())
+        "embed",
+        shape=(n_embeddings, n_out),
+        initializer=tf.uniform_unit_scaling_initializer())
     t_embed = tf.nn.embedding_lookup(v, t_in)
     return t_embed
 
