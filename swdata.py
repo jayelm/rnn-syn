@@ -105,6 +105,11 @@ def flatten(l):
     return [item for sublist in l for item in sublist]
 
 
+def train_test_split(train, test_split):
+    test_i = int(len(train) * test_split)
+    return train[test_i:], train[:test_i]
+
+
 def max_scenes(len_targets, len_distractors, n_targets, n_distractors):
     """
     How many scenes can be constructed with the given distractor/target

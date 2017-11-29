@@ -6,14 +6,16 @@ import net
 import tensorflow as tf
 import numpy as np
 import swdata
-import multiprocessing as mp
+from swdata import Scene, SWorld
 import os
 import sys
-from itertools import cycle
 import time
 
 
-random = np.random.RandomState(0)
+random = np.random.RandomState()
+
+assert Scene
+assert SWorld
 
 
 def build_feature_model(dataset,
@@ -103,36 +105,13 @@ if __name__ == "__main__":
         description='rnn-syn', formatter_class=ArgumentDefaultsHelpFormatter)
 
     data_opts = parser.add_argument_group('data', 'options for data gen')
-
     data_opts.add_argument(
-        '--load_data',
+        '--data',
         type=str,
-        default=None,
+        required=True,
         help='Folder of dataset to load')
-    data_opts.add_argument(
-        '--n_configs',
-        type=int,
-        default=15,
-        help='Number of random scene configs to sample')
-    data_opts.add_argument(
-        '--samples_each_config',
-        type=int,
-        default=100,
-        help='(max) number of scenes to sample per config')
-    data_opts.add_argument(
-        '--n_targets', type=int, default=2, help='Number of targets per scene')
-    data_opts.add_argument(
-        '--n_distractors',
-        type=int,
-        default=1,
-        help='Number of distractors per scene')
-    data_opts.add_argument(
-        '--n_cpu',
-        type=int,
-        default=1,
-        help='Number of cpus to use for mp (1 disables mp)')
 
-    net_opts = parser.add_argument_group('net', 'options for net training')
+    net_opts = parser.add_argument_group('net', 'options for net architecture')
     net_opts.add_argument(
         '--n_hidden', type=int, default=256, help='GRUCell hidden layer size')
     net_opts.add_argument(
@@ -144,13 +123,10 @@ if __name__ == "__main__":
         choices=['continuous', 'discrete'],
         help='Communication channel type')
 
-    train_opts = parser.add_argument_group('train', 'Options for net training')
-    do_training = parser.add_mutually_exclusive_group()
-    do_training.add_argument(
-        '--no_train', action='store_true', help='Don\'t train')
-    do_training.add_argument(
+    train_opts = parser.add_argument_group('train', 'options for net training')
+    train_opts.add_argument(
         '--restore', action='store_true', help='Restore model')
-    do_training.add_argument(
+    train_opts.add_argument(
         '--restore_path',
         type=str,
         default='saves/rnn-syn-model',
@@ -169,12 +145,26 @@ if __name__ == "__main__":
     train_opts.add_argument(
         '--batch_size', type=int, default=128, help='Batch size')
     train_opts.add_argument(
-        '--epochs', type=int, default=128, help='Number of training epochs')
+        '--epochs', type=int, default=16, help='Number of training epochs')
     train_opts.add_argument(
         '--max_data',
         type=int,
         default=None,
         help='Max size of training data (rest discarded)')
+
+    test_opts = parser.add_argument_group('train', 'options for net testing')
+    test_opts.add_argument('--test', action='store_true',
+                           help='do testing')
+    test_opts.add_argument('--test_split', type=float, default=0.2,
+                           help='% of dataset to test on')
+    test_opts.add_argument('--test_no_unique', action='store_true',
+                           help='Don\'t require testing unique configs')
+
+    save_opts = parser.add_argument_group('save messages')
+    save_opts.add_argument('--no_save_msgs', action='store_true',
+                           help='Don\'t save comptued messages after testing')
+    save_opts.add_argument('--msgs_file', default='{data}-msgs.npz',
+                           help='Save location (can use parser options)')
 
     args = parser.parse_args()
 
@@ -184,49 +174,46 @@ if __name__ == "__main__":
     if args.tf_seed is not None:
         tf.set_random_seed(args.tf_seed)
 
-    max_images = args.n_targets + args.n_distractors
-    max_shapes = 2
+    print("Loading data")
+    train, metadata = swdata.load_scenes(args.data, gz=True)
 
-    if not args.restore and args.load_data is None:
-        print("Generating data")
-        dataset_args = [(args.samples_each_config, args.n_targets,
-                         args.n_distractors) for _ in range(args.n_configs)]
-        if args.n_cpu == 1:  # Non-mp
-            dataset_iter = map(gen_dataset,
-                               list(zip(cycle([None]), dataset_args)))
+    # Do a split
+    if args.test:
+        # Keep unique configs only
+        if not args.test_no_unique:
+            # TODO: Support different kinds of testing (e.g. left/right)
+            unique_sets = []
+            seen_configs = set()
+            for config_data, config_md in zip(train, metadata['configs']):
+                config_hashable = (tuple(config_md['distractor']),
+                                   tuple(config_md['target']),
+                                   config_md['relation'],
+                                   config_md['relation_dir'])
+                if config_hashable not in seen_configs:
+                    seen_configs.add(config_hashable)
+                    unique_sets.append(config_data)
+            random.shuffle(unique_sets)
+            train, test = swdata.train_test_split(unique_sets,
+                                                  test_split=args.test_split)
+            train = swdata.flatten(train)
+            test = swdata.flatten(test)
+            random.shuffle(train)
+            random.shuffle(test)
         else:
-            t = time.time()
-            print("Multiprocessing")
-            pool = mp.Pool(args.n_cpu)
-            dataset_iter = pool.map(gen_dataset, list(enumerate(dataset_args)))
-            pool.close()
-            pool.join()
-            print("Elapsed time: {}s".format(round(time.time() - t, 2)))
-
-        train = []
-        for train_subset in dataset_iter:
-            train.extend(train_subset)
-
-        # Save data
-        save_file = '{}-{}-{}-{}t-{}d.pkl.gz'.format(
-            len(train), args.n_configs, args.samples_each_config,
-            args.n_targets, args.n_distractors)
-        save_file = os.path.join('data', save_file)
-        swdata.pickle_scenes(
-            train, save_file=save_file, gz=True)
+            train, test = swdata.train_test_split(train,
+                                                  test_split=args.test_split)
+            train = swdata.flatten(train)
+            random.shuffle(train)
+        print("Train:", len(train), "Test:", len(test))
     else:
-        if not args.load_data:
-            assert args.restore
-            raise RuntimeError("Must supply dataset if restoring model")
-        print("Loading data")
-        train = swdata.load_scenes(args.load_data, gz=True)
-        # For later naming of message/prediction np arrs
-        save_file = args.load_data
+        # Just train on everything
+        train = swdata.flatten(train)
 
+    max_images = metadata['n_targets'] + metadata['n_distractors']
+    max_shapes = 2
     n_attrs = len(train[0].worlds[0].shapes[0])
 
-    if args.no_train:
-        sys.exit(0)
+    # Throw out duplicate configs?
 
     print("Building model")
     t_features, t_labels, t_msg, t_pred, t_loss = build_feature_model(
@@ -270,7 +257,7 @@ if __name__ == "__main__":
                 total += len(match)
 
             acc = hits / total
-            print("Epoch {}: Accuracy {}".format(epoch, acc))
+            print("Epoch {}: Accuracy {}, Loss {}".format(epoch, acc, loss))
 
             loss_history.append(loss)
             acc_history.append(acc)
@@ -279,22 +266,24 @@ if __name__ == "__main__":
             saver = tf.train.Saver()
             saver.save(session, args.save_path)
 
-        # Save all envs
+    # ==== TEST ====
+    test_or_train = test if args.test else train
     all_envs, all_labels = swdata.extract_envs_and_labels(
-        train, max_images, max_shapes, n_attrs)
+        test_or_train, max_images, max_shapes, n_attrs)
     all_msgs, all_preds = session.run([t_msg, t_pred], {
         t_features: all_envs, t_labels: all_labels})
-    rels = list(map(lambda x: (x.relation == 'y-rel', x.relation_dir),
-                    train))
-    rels_np = np.array(rels)
-    rels_unique = list(set(rels))
-    rels_color_map = dict(zip(rels_unique, ['red', 'green', 'blue', 'orange']))
-    colors = np.array([rels_color_map[rel] for rel in rels])
-    print("Saving model predictions")
-    # TODO: I need info about target, etc
-    np.savez(save_file.replace('.pkl.gz', '-msgs.npz'),
-             msgs=all_msgs,
-             preds=all_preds,
-             obs=all_labels,
-             rels=rels_np,
-             colors=colors)
+
+    if args.test:  # Print test accuracy
+        match = (all_preds > 0) == all_labels
+        print("Test accuracy: {}".format(np.all(match, axis=1).sum() / len(match)))
+
+    relations = np.array([x.relation[0] for x in test_or_train])
+    relation_dirs = np.array([x.relation_dir for x in test_or_train])
+    if not args.no_save_msgs:
+        print("Saving model predictions")
+        np.savez(args.msgs_file.format(**vars(args)),
+                 msgs=all_msgs,
+                 preds=all_preds,
+                 obs=all_labels,
+                 relations=relations,
+                 relation_dirs=relation_dirs)
