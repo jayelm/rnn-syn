@@ -2,17 +2,26 @@
 Generate random shapeworld data
 """
 
-from collections import namedtuple
-import numpy as np
 from shapeworld.dataset import CaptionAgreementDataset
 from shapeworld.generators import RandomAttributesGenerator
 from shapeworld.captioners import ExistentialCaptioner, RegularTypeCaptioner, RelationCaptioner
 from shapeworld.world import World
-import os
-from tqdm import trange
+
+import numpy as np
 from PIL import Image
+from tqdm import tqdm
+
+import os
+import sys
+import shutil
+from glob import glob
+import json
+from collections import namedtuple
 import pickle
 import gzip
+from itertools import cycle
+import time
+import multiprocessing as mp
 
 
 random = np.random.RandomState()
@@ -51,18 +60,48 @@ Color = namedtuple('Color', ['color', 'shade'])
 RELATIONS = ['x-rel', 'y-rel']
 
 
+VOCABULARY = sorted([
+    '.', 'a', 'above', 'an', 'below', 'blue', 'circle', 'cross',
+    'cyan', 'ellipse', 'gray', 'green', 'is', 'left', 'magenta', 'of',
+    'pentagon', 'rectangle', 'red', 'right', 'semicircle', 'shape',
+    'square', 'the', 'to', 'triangle', 'yellow'
+])
+
+
 def pickle_scenes(scenes, save_file='data/dataset.pkl', gz=True):
+    if save_file == 'data/dataset.pkl' and gz:
+        save_file += '.gz'
+
     dirs, fname = os.path.split(save_file)
     os.makedirs(dirs, exist_ok=True)
+
     opener = gzip.open if gz else open
     with opener(save_file, 'wb') as fout:
-        pickle.dump(scenes, fout, protocol=-1)
+        pickle.dump(scenes, fout, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def load_scenes(fname, gz=True):
+def load_scenes(folder, gz=True):
+    metadata_file = os.path.join(folder, 'metadata.json')
+    with open(metadata_file, 'r') as fin:
+        metadata = json.load(fin)
+
     opener = gzip.open if gz else open
-    with opener(fname, 'rb') as fin:
-        return pickle.load(fin)
+    glob_pattern = '*.pkl.gz' if gz else '*.pkl'
+    global_scenes = []
+    for scene_file in glob(os.path.join(folder, glob_pattern)):
+        with opener(scene_file, 'rb') as fin:
+            try:
+                scenes = pickle.load(fin)
+            except AttributeError:
+                raise RuntimeError(
+                    "Can't find Scene/SWorld.\n"
+                    "   include `from swdata import Scene, SWorld`")
+            global_scenes.append(scenes)
+    return global_scenes, metadata
+
+
+def flatten(l):
+    return [item for sublist in l for item in sublist]
 
 
 def max_scenes(len_targets, len_distractors, n_targets, n_distractors):
@@ -147,7 +186,7 @@ class FixedWorldGenerator(RandomAttributesGenerator):
         n = 0
         last_entity = -1
         assert self.num_entities <= len(self.validation_combinations), \
-                "insufficient validation combs"
+            "insufficient validation combs"
         if self.validation_combinations:
             remain_combs = list(self.validation_combinations)
             while True:
@@ -242,6 +281,10 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         if relation is None:
             relation = random.choice(RELATIONS)
 
+        if len(combinations) > 2:
+            # TODO: Extend to multishape case
+            raise NotImplementedError
+
         self.shapes = combinations
         self.relation = relation
 
@@ -250,15 +293,11 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         if target_i is None:
             self.target_i = random.randint(len(self.shapes))
             self.target_obj = self.shapes[self.target_i]
+            self.distractor_obj = self.shapes[1 - self.target_i]
 
         assert relation in ('x-rel', 'y-rel'), "Invalid relation"
 
-        vocabulary = sorted([
-            '.', 'a', 'above', 'an', 'below', 'blue', 'circle', 'cross',
-            'cyan', 'ellipse', 'gray', 'green', 'is', 'left', 'magenta', 'of',
-            'pentagon', 'rectangle', 'red', 'right', 'semicircle', 'shape',
-            'square', 'the', 'to', 'triangle', 'yellow'
-        ])
+        vocabulary = VOCABULARY
 
         world_generator = FixedWorldGenerator(
             entity_counts=[2],
@@ -363,6 +402,10 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                                     n_distractors=1):
         n_scenes = max_scenes(len(targets), len(distractors),
                               n_targets, n_distractors)
+        if n_scenes == 0:
+            raise ValueError("Not enough targets/distractors for 1 scene")
+        if n_scenes == 1:
+            print("Warning: only making 1 scene")
 
         scenes = []
         for scene_i in range(n_scenes):
@@ -451,9 +494,40 @@ class SpatialExtraSimple(CaptionAgreementDataset):
             fout.write(html_str)
             fout.write('\n')
 
-    @classmethod
-    def to_html_many(cls, datas, save_dir='test'):
+    @staticmethod
+    def to_html_general(scenes, metadata=None, save_dir='test'):
+        """
+        Like to_html, but uses dataset metadata
+        """
         raise NotImplementedError
+
+
+def gen_dataset(iargs):
+    i, args = iargs
+    if i is not None:
+        t = time.time()
+        print("{} Started".format(i))
+        sys.stdout.flush()
+    n, max_n, n_targets, n_distractors, save_folder = args
+    dataset = SpatialExtraSimple()
+    train = dataset.generate(
+        max_n, n_targets=n_targets, n_distractors=n_distractors)
+    if i is not None:
+        print("{} Finished ({}s)".format(i, round(time.time() - t, 2)))
+        sys.stdout.flush()
+    # Save data
+    save_file = '{}.pkl.gz'.format(n)
+    pickle_scenes(
+        train, save_file=os.path.join(save_folder, save_file), gz=True)
+    # Return config metadata
+    return {
+        'config': n,
+        'n': len(train),
+        'relation': dataset.relation,
+        'relation_dir': int(dataset.relation_dir),
+        'target': dataset.target_obj,
+        'distractor': dataset.distractor_obj
+    }
 
 
 if __name__ == "__main__":
@@ -463,15 +537,90 @@ if __name__ == "__main__":
         formatter_class=ArgumentDefaultsHelpFormatter,
         description='Generate spatial datasets')
     parser.add_argument(
-        '-n', default=1, type=int, help='# dataset configs to produce')
+        '--n_configs',
+        type=int,
+        default=15,
+        help='Number of random scene configs to sample')
     parser.add_argument(
-        '--each', default=100, type=int, help='# (max) images per config')
+        '--samples_each_config',
+        type=int,
+        default=100,
+        help='(max) number of scenes to sample per config')
+    parser.add_argument(
+        '--n_targets', type=int, default=2, help='Number of targets per scene')
+    parser.add_argument(
+        '--n_distractors',
+        type=int,
+        default=1,
+        help='Number of distractors per scene')
+    parser.add_argument(
+        '--save_folder',
+        default='data/{n_configs}_{samples_each_config}',
+        help='Save folder (can use other args)')
+    parser.add_argument(
+        '--n_cpu',
+        type=int,
+        default=1,
+        help='Number of cpus to use for mp (1 disables mp)')
+    parser.add_argument(
+        '--overwrite',
+        action='store_true',
+        help='Overwrite data folder if already exists')
+    parser.add_argument(
+        '--verify_load',
+        action='store_true',
+        help='Verify data by reloading it')
 
     args = parser.parse_args()
 
-    for _ in trange(args.n):
-        dataset = SpatialExtraSimple()
-        train = dataset.generate(args.each)
-        dataset.to_html(train, save_dir='test')
-        pickle_scenes(train, save_file='test/test.pkl.gz')
-        train2 = load_scenes('test/test.pkl.gz')
+    # Check save folder.
+    save_folder = args.save_folder.format(**vars(args))
+    if os.path.exists(save_folder):
+        overwrite_msg = 'Overwrite {}? [y/N] '.format(save_folder)
+        if args.overwrite or input(overwrite_msg).lower().startswith('y'):
+            shutil.rmtree(save_folder)
+        else:
+            print("Exiting")
+            sys.exit(0)
+    os.mkdir(save_folder)
+
+    print("Generating data")
+    args1 = (args.samples_each_config, args.n_targets,
+             args.n_distractors, save_folder)
+    # Index the datasets by config
+    dataset_args = [(i, ) + args1 for i in range(args.n_configs)]
+
+    if args.n_cpu == 1:  # Non-mp, track progress with tqdm
+        dataset_metas = []
+        for dargs in tqdm(list(zip(cycle([None]), dataset_args))):
+            dataset_meta = gen_dataset(dargs)
+            dataset_metas.append(dataset_meta)
+    else:
+        t = time.time()
+        print("Multiprocessing")
+        pool = mp.Pool(args.n_cpu)
+        dataset_metas = pool.map(gen_dataset, list(enumerate(dataset_args)))
+        pool.close()
+        pool.join()
+        print("Elapsed time: {}s".format(round(time.time() - t, 2)))
+
+    print("Writing metadata")
+    metadata = {
+        'n': sum(d['n'] for d in dataset_metas),
+        'n_configs': args.n_configs,
+        'samples_each_config': args.samples_each_config,
+        'n_targets': args.n_targets,
+        'n_distractors': args.n_distractors,
+        'configs': dataset_metas
+    }
+    with open(os.path.join(save_folder, 'metadata.json'), 'w') as fout:
+        json.dump(metadata, fout, sort_keys=True,
+                  indent=2, separators=(',', ': '))
+    print("Done")
+
+    if args.verify_load:
+        try:
+            _ = load_scenes(save_folder)
+        except Exception as e:
+            print("\nDataset verification failed:\n")
+            raise
