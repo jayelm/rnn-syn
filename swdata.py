@@ -396,6 +396,9 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                 <head>
                     <title>temp</title>
                     <style>
+                    img {
+                        display: block;
+                    }
                     .scene {
                         display: block;
                         margin-top: 20px;
@@ -451,9 +454,66 @@ class SpatialExtraSimple(CaptionAgreementDataset):
             fout.write(html_str)
             fout.write('\n')
 
-    @classmethod
-    def to_html_many(cls, datas, save_dir='test'):
-        raise NotImplementedError
+    @staticmethod
+    def to_html_many(data, save_dir='test'):
+        """
+        Save images as bmps and html index to save_dir,
+        without captions, etc
+        """
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+        html_str = """
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <title>temp</title>
+                    <style>
+                    img {
+                        display: block;
+                    }
+                    .scene {
+                        display: block;
+                        margin-top: 20px;
+                        margin-bottom: 20px;
+                    }
+                    .target {
+                        display: inline-block;
+                        padding: 10px;
+                        background-color: #99ff99;
+                    }
+                    .distractor {
+                        display: inline-block;
+                        padding: 10px;
+                        background-color: #ff9999;
+                    }
+                    </style>
+                </head>
+            <body>
+        """
+        global_i = 0
+        for i, scene in enumerate(data):
+            html_str += "<div class='scene' id='{}'>".format(i)
+
+            for sw_i, swlabel in enumerate(zip(scene.worlds, scene.labels)):
+                sw, label = swlabel
+                label_str = 'target' if label else 'distractor'
+                # Save image
+                img = sw_arr_to_img(sw.image)
+                world_name = 'world-{}-{}.bmp'.format(global_i, label_str)
+                global_i += 1
+                img.save(os.path.join(save_dir, world_name))
+
+                # Add link to html with given class
+                html_str += """
+                    <div class='{}'><img src='{}'></img></div>
+                """.format(label_str, world_name)
+            html_str += "</div>"
+
+        html_str += "</body></html>"
+
+        with open(os.path.join(save_dir, 'index.html'), 'w') as fout:
+            fout.write(html_str)
+            fout.write('\n')
 
 
 if __name__ == "__main__":

@@ -211,14 +211,17 @@ if __name__ == "__main__":
         save_file = '{}-{}-{}-{}t-{}d.pkl.gz'.format(
             len(train), args.n_configs, args.samples_each_config,
             args.n_targets, args.n_distractors)
+        save_file = os.path.join('data', save_file)
         swdata.pickle_scenes(
-            train, save_file=os.path.join('data', save_file), gz=True)
+            train, save_file=save_file, gz=True)
     else:
         if not args.load_data:
             assert args.restore
             raise RuntimeError("Must supply dataset if restoring model")
         print("Loading data")
         train = swdata.load_scenes(args.load_data, gz=True)
+        # For later naming of message/prediction np arrs
+        save_file = args.load_data
 
     n_attrs = len(train[0].worlds[0].shapes[0])
 
@@ -275,3 +278,23 @@ if __name__ == "__main__":
         if args.save:
             saver = tf.train.Saver()
             saver.save(session, args.save_path)
+
+        # Save all envs
+    all_envs, all_labels = swdata.extract_envs_and_labels(
+        train, max_images, max_shapes, n_attrs)
+    all_msgs, all_preds = session.run([t_msg, t_pred], {
+        t_features: all_envs, t_labels: all_labels})
+    rels = list(map(lambda x: (x.relation == 'y-rel', x.relation_dir),
+                    train))
+    rels_np = np.array(rels)
+    rels_unique = list(set(rels))
+    rels_color_map = dict(zip(rels_unique, ['red', 'green', 'blue', 'orange']))
+    colors = np.array([rels_color_map[rel] for rel in rels])
+    print("Saving model predictions")
+    # TODO: I need info about target, etc
+    np.savez(save_file.replace('.pkl.gz', '-msgs.npz'),
+             msgs=all_msgs,
+             preds=all_preds,
+             obs=all_labels,
+             rels=rels_np,
+             colors=colors)
