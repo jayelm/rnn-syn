@@ -59,12 +59,49 @@ def build_feature_model(dataset,
     return t_features, t_labels, t_msg, t_pred, t_loss
 
 
-def build_end2end_model(dataset, n_images, max_shapes, n_attrs):
+def build_end2end_model(dataset, n_images,
+                        image_dim=(64, 64, 3),
+                        net_arch=(256, 64, 1024)):
     """
-    Return an encoder-decoder model that uses the raw ShapeWorld image data for
-    communication.
+    Return an encoder-decoder model that uses raw ShapeWorld images
     """
-    raise NotImplementedError
+    n_hidden, n_comm, n_toplevel_conv = net_arch
+
+    # The raw image representation, of shape n_images * image_dim
+    t_features_raw = tf.placeholder(tf.float32,
+                                    (None, n_images) + image_dim)
+
+    t_features_toplevel_enc = net.convolve(t_features_raw, n_images,
+                                           n_toplevel_conv)
+
+    # Whether an image is the target
+    import ipdb; ipdb.set_trace()
+    t_labels = tf.placeholder(tf.float32, (None, n_images))
+
+    # Encoder observes both object features and target labels
+    t_in = tf.concat((t_features_toplevel_enc,
+                      tf.expand_dims(t_labels, axis=2)), axis=2)
+
+    cell = tf.contrib.rnn.GRUCell(n_hidden)
+    with tf.variable_scope("enc1"):
+        states1, hidden1 = tf.nn.dynamic_rnn(cell, t_in, dtype=tf.float32)
+    t_hidden = hidden1
+    t_msg = tf.nn.relu(net.linear(t_hidden, n_comm))
+
+    # Decoder makes independent predictions for each set of object features
+    t_expand_msg = tf.expand_dims(t_msg, axis=1)
+    t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
+    t_features_toplevel_dec = net.convolve(t_features_raw, n_images,
+                                           n_toplevel_conv)
+    t_out_feats = tf.concat((t_tile_message, t_features_toplevel_dec), axis=2)
+    t_pred = tf.squeeze(net.mlp(t_out_feats, (n_hidden, 1), (tf.nn.relu, None)))
+    t_loss = tf.reduce_mean(
+        tf.nn.sigmoid_cross_entropy_with_logits(
+            labels=t_labels, logits=t_pred))
+
+    return t_features_raw, t_labels, t_msg, t_pred, t_loss
+
+
 
 
 def gen_dataset(iargs):
@@ -103,6 +140,13 @@ if __name__ == "__main__":
 
     parser = ArgumentParser(
         description='rnn-syn', formatter_class=ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument(
+        '--model',
+        type=str,
+        choices=['feature', 'end2end'],
+        default='end2end',
+        help='Model type')
 
     data_opts = parser.add_argument_group('data', 'options for data gen')
     data_opts.add_argument(
@@ -163,7 +207,7 @@ if __name__ == "__main__":
     save_opts = parser.add_argument_group('save messages')
     save_opts.add_argument('--no_save_msgs', action='store_true',
                            help='Don\'t save comptued messages after testing')
-    save_opts.add_argument('--msgs_file', default='{data}-msgs.npz',
+    save_opts.add_argument('--msgs_file', default='{data}-{model}-msgs.npz',
                            help='Save location (can use parser options)')
 
     args = parser.parse_args()
@@ -216,12 +260,20 @@ if __name__ == "__main__":
     # Throw out duplicate configs?
 
     print("Building model")
-    t_features, t_labels, t_msg, t_pred, t_loss = build_feature_model(
-        train,
-        max_images,
-        max_shapes,
-        n_attrs,
-        net_arch=(args.n_hidden, args.n_comm))
+    if args.model == 'feature':
+        t_features, t_labels, t_msg, t_pred, t_loss = build_feature_model(
+            train,
+            max_images,
+            max_shapes,
+            n_attrs,
+            net_arch=(args.n_hidden, args.n_comm))
+    elif args.model == 'end2end':
+        t_features, t_labels, t_msg, t_pred, t_loss = build_end2end_model(
+            train,
+            max_images,
+            net_arch=(args.n_hidden, args.n_comm, 1024))
+    else:
+        raise RuntimeError
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
     session = tf.Session()
@@ -244,8 +296,14 @@ if __name__ == "__main__":
             random.shuffle(train)
             for batch in batches(
                     train, args.batch_size, max_data=args.max_data):
-                envs, labels = swdata.extract_envs_and_labels(
-                    batch, max_images, max_shapes, n_attrs)
+                if args.model == 'feature':
+                    envs, labels = swdata.extract_envs_and_labels(
+                        batch, max_images, max_shapes, n_attrs)
+                elif args.model == 'end2end':
+                    envs, labels = swdata.prepare_end2end(
+                        batch, max_images)
+                else:
+                    raise RuntimeError
                 l, preds, _ = session.run([t_loss, t_pred, o_train], {
                     t_features: envs,
                     t_labels: labels
@@ -268,8 +326,14 @@ if __name__ == "__main__":
 
     # ==== TEST ====
     test_or_train = test if args.test else train
-    all_envs, all_labels = swdata.extract_envs_and_labels(
-        test_or_train, max_images, max_shapes, n_attrs)
+    if args.model == 'feature':
+        all_envs, all_labels = swdata.extract_envs_and_labels(
+            test_or_train, max_images, max_shapes, n_attrs)
+    elif args.model == 'end2end':
+        all_envs, all_labels = swdata.prepare_end2end(
+            test_or_train, max_images)
+    else:
+        raise RuntimeError
     all_msgs, all_preds = session.run([t_msg, t_pred], {
         t_features: all_envs, t_labels: all_labels})
 

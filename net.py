@@ -20,15 +20,6 @@ def linear(t_in, n_out):
     return tf.einsum(op, t_in, v_w) + v_b
 
 
-def embed(t_in, n_embeddings, n_out):
-    v = tf.get_variable(
-        "embed",
-        shape=(n_embeddings, n_out),
-        initializer=tf.uniform_unit_scaling_initializer())
-    t_embed = tf.nn.embedding_lookup(v, t_in)
-    return t_embed
-
-
 def mlp(t_in, widths, activations):
     assert len(widths) == len(activations)
     prev_layer = t_in
@@ -39,3 +30,36 @@ def mlp(t_in, widths, activations):
                 layer = act(layer)
         prev_layer = layer
     return prev_layer
+
+
+def convolve(raw, n_images, n_toplevel_conv):
+    conv1_list = []
+    for i in range(n_images):
+        slice = raw[:, i, :, :, :]
+        t_conv_1 = tf.layers.conv2d(slice, filters=32,
+                                    strides=[2, 2],
+                                    kernel_size=[5, 5],
+                                    padding='same', activation=tf.nn.relu)
+        conv1_list.append(t_conv_1)
+
+    conv1 = tf.stack(conv1_list, axis=1)
+
+    # Second convolutional layer - 64 features with a 5x5 filter, stride 2
+    conv2_list = []
+    for i in range(3):
+        slice = conv1[:, i, :, :, :]
+        t_conv_2 = tf.layers.conv2d(slice, filters=64,
+                                    strides=[2, 2],
+                                    kernel_size=[5, 5],
+                                    padding='same', activation=tf.nn.relu)
+        conv2_list.append(t_conv_2)
+
+    conv2 = tf.stack(conv2_list, axis=1)
+
+    conv2_flat = tf.reshape(
+        conv2, (-1, n_images, conv2.shape[2] * conv2.shape[3] * conv2.shape[4]))
+
+    # Dense layer
+    dense = tf.layers.dense(inputs=conv2_flat, units=n_toplevel_conv,
+                            activation=tf.nn.relu)
+    return dense

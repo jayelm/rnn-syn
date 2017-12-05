@@ -184,6 +184,27 @@ def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs):
     return envs, labels
 
 
+def prepare_end2end(scenes, n_images):
+    """
+    Given a list of scenes, return a list of tf-compatible feature reps and
+    labels
+    """
+    n_scenes = len(scenes)
+
+    image_dim = scenes[0].worlds[0].image.shape
+
+    envs = np.zeros((n_scenes, n_images) + image_dim)
+    labels = np.zeros((n_scenes, n_images))
+
+    for scene_i, scene in enumerate(scenes):
+        for img_i, wl in enumerate(zip(scene.worlds, scene.labels)):
+            world, label = wl
+            envs[scene_i, img_i, :] = world.image
+            labels[scene_i, img_i] = label
+
+    return envs, labels
+
+
 class FixedWorldGenerator(RandomAttributesGenerator):
     def generate_validation_world(self):
         world = World(self.world_size, self.world_color)
