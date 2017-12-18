@@ -46,7 +46,7 @@ def convolve(raw, n_images, n_toplevel_conv):
 
     # Second convolutional layer - 64 features with a 5x5 filter, stride 2
     conv2_list = []
-    for i in range(3):
+    for i in range(n_images):
         slice = conv1[:, i, :, :, :]
         t_conv_2 = tf.layers.conv2d(slice, filters=64,
                                     strides=[2, 2],

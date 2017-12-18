@@ -38,7 +38,8 @@ def build_feature_model(dataset,
     t_labels = tf.placeholder(tf.float32, (None, n_images))
 
     # Encoder observes both object features and target labels
-    t_in = tf.concat((t_features, tf.expand_dims(t_labels, axis=2)), axis=2)
+    t_labels_exp = tf.expand_dims(t_labels, axis=2)
+    t_in = tf.concat((t_features, t_labels_exp), axis=2)
 
     cell = tf.contrib.rnn.GRUCell(n_hidden)
     with tf.variable_scope("enc1"):
@@ -75,12 +76,11 @@ def build_end2end_model(dataset, n_images,
                                            n_toplevel_conv)
 
     # Whether an image is the target
-    import ipdb; ipdb.set_trace()
     t_labels = tf.placeholder(tf.float32, (None, n_images))
 
     # Encoder observes both object features and target labels
-    t_in = tf.concat((t_features_toplevel_enc,
-                      tf.expand_dims(t_labels, axis=2)), axis=2)
+    t_labels_exp = tf.expand_dims(t_labels, axis=2)
+    t_in = tf.concat((t_features_toplevel_enc, t_labels_exp), axis=2)
 
     cell = tf.contrib.rnn.GRUCell(n_hidden)
     with tf.variable_scope("enc1"):
