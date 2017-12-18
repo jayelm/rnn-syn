@@ -7,7 +7,6 @@ import tensorflow as tf
 import numpy as np
 import swdata
 from swdata import Scene, SWorld
-import os
 import sys
 import time
 
@@ -94,14 +93,13 @@ def build_end2end_model(dataset, n_images,
     t_features_toplevel_dec = net.convolve(t_features_raw, n_images,
                                            n_toplevel_conv)
     t_out_feats = tf.concat((t_tile_message, t_features_toplevel_dec), axis=2)
-    t_pred = tf.squeeze(net.mlp(t_out_feats, (n_hidden, 1), (tf.nn.relu, None)))
+    t_pred = tf.squeeze(net.mlp(t_out_feats, (n_hidden, 1),
+                                (tf.nn.relu, None)))
     t_loss = tf.reduce_mean(
         tf.nn.sigmoid_cross_entropy_with_logits(
             labels=t_labels, logits=t_pred))
 
     return t_features_raw, t_labels, t_msg, t_pred, t_loss
-
-
 
 
 def gen_dataset(iargs):
@@ -326,28 +324,57 @@ if __name__ == "__main__":
 
     # ==== TEST ====
     test_or_train = test if args.test else train
-    if args.model == 'feature':
-        all_envs, all_labels = swdata.extract_envs_and_labels(
-            test_or_train, max_images, max_shapes, n_attrs)
-    elif args.model == 'end2end':
-        all_envs, all_labels = swdata.prepare_end2end(
-            test_or_train, max_images)
-    else:
-        raise RuntimeError
-    all_msgs, all_preds = session.run([t_msg, t_pred], {
-        t_features: all_envs, t_labels: all_labels})
+
+    # Eval test in batches too
+    all_msgs = []
+    all_preds = []
+    all_labels = []
+    all_relations = []
+    all_relation_dirs = []
+
+    for batch in batches(test_or_train, args.batch_size):
+        if args.model == 'feature':
+            batch_envs, batch_labels = swdata.extract_envs_and_labels(
+                batch, max_images, max_shapes, n_attrs)
+        elif args.model == 'end2end':
+            batch_envs, batch_labels = swdata.prepare_end2end(
+                batch, max_images)
+        else:
+            raise RuntimeError
+
+        batch_msgs, batch_preds = session.run([t_msg, t_pred], {
+            t_features: batch_envs, t_labels: batch_labels})
+
+        all_msgs.extend(batch_msgs)
+        all_preds.extend(batch_preds)
+        all_labels.extend(batch_labels)
+        all_relations.extend(x.relation[0] for x in batch)
+        all_relation_dirs.extend(x.relation_dir for x in batch)
+
+    all_msgs = np.array(all_msgs)
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+    all_relations = np.array(all_relations)
+    all_relation_dirs = np.array(all_relation_dirs)
+
+    # To save space, coerce to boolean arrays
+    all_preds = (all_preds > 0).astype(np.bool)
+    all_labels = all_labels.astype(np.bool)
+    all_relations = (all_relations == 'y').astype(np.bool)
+    all_relation_dirs = (all_relation_dirs > 0).astype(np.bool)
+
+    import ipdb; ipdb.set_trace()
 
     if args.test:  # Print test accuracy
-        match = (all_preds > 0) == all_labels
-        print("Test accuracy: {}".format(np.all(match, axis=1).sum() / len(match)))
+        match = all_preds == all_labels
+        hits = np.all(match, axis=1).sum()
+        print("Test accuracy: {}".format(hits / len(match)))
 
-    relations = np.array([x.relation[0] for x in test_or_train])
-    relation_dirs = np.array([x.relation_dir for x in test_or_train])
     if not args.no_save_msgs:
         print("Saving model predictions")
         np.savez(args.msgs_file.format(**vars(args)),
                  msgs=all_msgs,
                  preds=all_preds,
                  obs=all_labels,
-                 relations=relations,
-                 relation_dirs=relation_dirs)
+                 relations=all_relations,
+                 relation_dirs=all_relation_dirs)
