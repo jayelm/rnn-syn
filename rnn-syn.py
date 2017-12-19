@@ -363,8 +363,6 @@ if __name__ == "__main__":
     all_relations = (all_relations == 'y').astype(np.bool)
     all_relation_dirs = (all_relation_dirs > 0).astype(np.bool)
 
-    import ipdb; ipdb.set_trace()
-
     if args.test:  # Print test accuracy
         match = all_preds == all_labels
         hits = np.all(match, axis=1).sum()
