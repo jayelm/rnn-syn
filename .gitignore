@@ -4,5 +4,6 @@ __pycache__
 .ipynb_checkpoints
 
 test/
-saves/
+saves/*
+!saves/README.md
 data/
