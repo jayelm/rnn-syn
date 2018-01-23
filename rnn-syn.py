@@ -171,8 +171,8 @@ if __name__ == "__main__":
     train_opts.add_argument(
         '--restore_path',
         type=str,
-        default='saves/rnn-syn-model',
-        help='Restore filepath')
+        default='saves/{data}-{model}-model.model',
+        help='Restore filepath (can use parser options)')
     train_opts.add_argument(
         '--save',
         action='store_true',
@@ -180,8 +180,8 @@ if __name__ == "__main__":
     train_opts.add_argument(
         '--save_path',
         type=str,
-        default='saves/rnn-syn-model',
-        help='Save model filepath')
+        default='saves/{data}-{model}-model.model',
+        help='Save model filepath (can use parser options)')
     train_opts.add_argument(
         '--tf_seed', type=int, default=None, help='Random TensorFlow seed')
     train_opts.add_argument(
@@ -198,7 +198,7 @@ if __name__ == "__main__":
     test_opts.add_argument('--test', action='store_true',
                            help='do testing')
     test_opts.add_argument('--test_split', type=float, default=0.2,
-                           help='% of dataset to test on')
+                           help='%% of dataset to test on')
     test_opts.add_argument('--test_no_unique', action='store_true',
                            help='Don\'t require testing unique configs')
 
@@ -280,7 +280,7 @@ if __name__ == "__main__":
     # ==== TRAIN ====
     if args.restore:
         saver = tf.train.Saver()
-        saver.restore(session, args.restore_path)
+        saver.restore(session, args.restore_path.format(**vars(args)))
     else:
         acc_history = []
         loss_history = []
@@ -320,7 +320,7 @@ if __name__ == "__main__":
 
         if args.save:
             saver = tf.train.Saver()
-            saver.save(session, args.save_path)
+            saver.save(session, args.save_path.format(**vars(args)))
 
     # ==== TEST ====
     test_or_train = test if args.test else train
