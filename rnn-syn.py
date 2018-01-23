@@ -11,8 +11,6 @@ import sys
 import time
 
 
-random = np.random.RandomState()
-
 assert Scene
 assert SWorld
 
@@ -183,7 +181,11 @@ if __name__ == "__main__":
         default='saves/{data}-{model}-model.model',
         help='Save model filepath (can use parser options)')
     train_opts.add_argument(
-        '--tf_seed', type=int, default=None, help='Random TensorFlow seed')
+        '--seed', type=int, default=None,
+        help='Random seed (if none, picked randomly)')
+    train_opts.add_argument(
+        '--tf_seed', type=int, default=None,
+        help='Random TensorFlow seed (by default, same as args.seed)')
     train_opts.add_argument(
         '--batch_size', type=int, default=128, help='Batch size')
     train_opts.add_argument(
@@ -213,8 +215,15 @@ if __name__ == "__main__":
     if args.comm_type == 'discrete':
         raise NotImplementedError
 
+    if args.seed is not None:
+        random = np.random.RandomState(args.seed)
+    else:
+        random = np.random.RandomState(args.seed)
+
     if args.tf_seed is not None:
         tf.set_random_seed(args.tf_seed)
+    elif args.seed is not None:
+        tf.set_random_seed(args.seed)
 
     print("Loading data")
     train, metadata = swdata.load_scenes(args.data, gz=True)
