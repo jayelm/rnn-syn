@@ -85,7 +85,8 @@ def build_end2end_model(dataset, n_images,
          convnet toplevel layer dimensionality)
 
     discrete:
-        Discretize by softmaxing the message.
+        Discretize by one-hot encoding the message. Then message
+        dimensionality arg of net_arch encodes vocabulary size
     """
     n_hidden, n_comm, n_toplevel_conv = net_arch
 
