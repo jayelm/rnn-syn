@@ -249,6 +249,8 @@ if __name__ == "__main__":
                            help='Don\'t save comptued messages after testing')
     save_opts.add_argument('--msgs_file', default='{data}-{model}-msgs.npz',
                            help='Save location (can use parser options)')
+    save_opts.add_argument('--save_max', type=int, default=None,
+                           help='Maximum number of messages to save')
 
     args = parser.parse_args()
 
@@ -419,6 +421,13 @@ if __name__ == "__main__":
         match = all_preds == all_labels
         hits = np.all(match, axis=1).sum()
         print("Test accuracy: {}".format(hits / len(match)))
+
+    if args.save_max is not None:
+        all_msgs = all_msgs[:args.save_max]
+        all_preds = all_preds[:args.save_max]
+        all_labels = all_labels[:args.save_max]
+        all_relations = all_relations[:args.save_max]
+        all_relation_dirs = all_relation_dirs[:args.save_max]
 
     if not args.no_save_msgs:
         print("Saving model predictions")
