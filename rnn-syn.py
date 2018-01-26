@@ -254,7 +254,9 @@ if __name__ == "__main__":
             train, test = swdata.train_test_split(train,
                                                   test_split=args.test_split)
             train = swdata.flatten(train)
+            test = swdata.flatten(test)
             random.shuffle(train)
+            random.shuffle(test)
         print("Train:", len(train), "Test:", len(test))
     else:
         # Just train on everything
