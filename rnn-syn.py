@@ -11,6 +11,12 @@ import sys
 import time
 
 
+RNN_CELLS = {
+    'gru': tf.contrib.rnn.GRUCell,
+    'lstm': tf.contrib.rnn.LSTMCell,
+}
+
+
 assert Scene
 assert SWorld
 
@@ -19,12 +25,16 @@ def build_feature_model(dataset,
                         n_images,
                         max_shapes,
                         n_attrs,
-                        net_arch=(256, 64)):
+                        net_arch=(256, 64),
+                        discrete=False,
+                        rnncell=tf.contrib.rnn.GRUCell):
     """
     Return an encoder-decoder model that uses the raw feature representation
     of ShapeWorld microworlds for communication. This is exactly the model used
     in Andreas and Klein (2017).
     """
+    if discrete:
+        raise NotImplementedError
     n_hidden, n_comm = net_arch
 
     # Each image represented as a max_shapes * n_attrs array
@@ -38,7 +48,10 @@ def build_feature_model(dataset,
     t_labels_exp = tf.expand_dims(t_labels, axis=2)
     t_in = tf.concat((t_features, t_labels_exp), axis=2)
 
-    cell = tf.contrib.rnn.GRUCell(n_hidden)
+    if rnncell == tf.contrib.rnn.LSTMCell:
+        cell = rnncell(n_hidden, state_is_tuple=False)
+    else:
+        cell = rnncell(n_hidden)
     with tf.variable_scope("enc1"):
         states1, hidden1 = tf.nn.dynamic_rnn(cell, t_in, dtype=tf.float32)
     t_hidden = hidden1
@@ -54,14 +67,25 @@ def build_feature_model(dataset,
         tf.nn.sigmoid_cross_entropy_with_logits(
             labels=t_labels, logits=t_pred))
 
-    return t_features, t_labels, t_msg, t_pred, t_loss
+    return (t_features, t_labels,
+            (t_msg_discrete if discrete else t_msg),
+            t_pred, t_loss)
 
 
 def build_end2end_model(dataset, n_images,
                         image_dim=(64, 64, 3),
-                        net_arch=(256, 64, 1024)):
+                        net_arch=(256, 64, 1024),
+                        discrete=False,
+                        rnncell=tf.contrib.rnn.GRUCell):
     """
     Return an encoder-decoder model that uses raw ShapeWorld images
+
+    net_arch:
+        (number of GRU hidden units, message dimensionality,
+         convnet toplevel layer dimensionality)
+
+    discrete:
+        Discretize by softmaxing the message.
     """
     n_hidden, n_comm, n_toplevel_conv = net_arch
 
@@ -79,14 +103,22 @@ def build_end2end_model(dataset, n_images,
     t_labels_exp = tf.expand_dims(t_labels, axis=2)
     t_in = tf.concat((t_features_toplevel_enc, t_labels_exp), axis=2)
 
-    cell = tf.contrib.rnn.GRUCell(n_hidden)
+    if rnncell == tf.contrib.rnn.LSTMCell:
+        cell = rnncell(n_hidden, state_is_tuple=False)
+    else:
+        cell = rnncell(n_hidden)
     with tf.variable_scope("enc1"):
         states1, hidden1 = tf.nn.dynamic_rnn(cell, t_in, dtype=tf.float32)
     t_hidden = hidden1
     t_msg = tf.nn.relu(net.linear(t_hidden, n_comm))
 
+    if discrete:
+        t_msg_discrete = tf.one_hot(tf.argmax(t_msg, axis=1),
+                                    depth=n_comm)
+
     # Decoder makes independent predictions for each set of object features
-    t_expand_msg = tf.expand_dims(t_msg, axis=1)
+    t_expand_msg = tf.expand_dims(t_msg_discrete if discrete else t_msg,
+                                  axis=1)
     t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
     t_features_toplevel_dec = net.convolve(t_features_raw, n_images,
                                            n_toplevel_conv)
@@ -97,7 +129,9 @@ def build_end2end_model(dataset, n_images,
         tf.nn.sigmoid_cross_entropy_with_logits(
             labels=t_labels, logits=t_pred))
 
-    return t_features_raw, t_labels, t_msg, t_pred, t_loss
+    return (t_features_raw, t_labels,
+            (t_msg_discrete if discrete else t_msg),
+            t_pred, t_loss)
 
 
 def gen_dataset(iargs):
@@ -162,6 +196,12 @@ if __name__ == "__main__":
         default='continuous',
         choices=['continuous', 'discrete'],
         help='Communication channel type')
+    net_opts.add_argument(
+        '--rnn_cell',
+        type=str,
+        default='gru',
+        choices=['lstm', 'gru'],
+        help='RNN Cell type')
 
     train_opts = parser.add_argument_group('train', 'options for net training')
     train_opts.add_argument(
@@ -211,9 +251,6 @@ if __name__ == "__main__":
                            help='Save location (can use parser options)')
 
     args = parser.parse_args()
-
-    if args.comm_type == 'discrete':
-        raise NotImplementedError
 
     if args.seed is not None:
         random = np.random.RandomState(args.seed)
@@ -275,12 +312,16 @@ if __name__ == "__main__":
             max_images,
             max_shapes,
             n_attrs,
-            net_arch=(args.n_hidden, args.n_comm))
+            net_arch=(args.n_hidden, args.n_comm),
+            discrete=args.comm_type == 'discrete')
     elif args.model == 'end2end':
         t_features, t_labels, t_msg, t_pred, t_loss = build_end2end_model(
             train,
             max_images,
-            net_arch=(args.n_hidden, args.n_comm, 1024))
+            net_arch=(args.n_hidden, args.n_comm, 1024),
+            discrete=args.comm_type == 'discrete',
+            rnncell=RNN_CELLS[args.rnn_cell]
+        )
     else:
         raise RuntimeError
     optimizer = tf.train.AdamOptimizer(0.001)
