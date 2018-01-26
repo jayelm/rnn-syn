@@ -33,8 +33,6 @@ def build_feature_model(dataset,
     of ShapeWorld microworlds for communication. This is exactly the model used
     in Andreas and Klein (2017).
     """
-    if discrete:
-        raise NotImplementedError
     n_hidden, n_comm = net_arch
 
     # Each image represented as a max_shapes * n_attrs array
@@ -56,9 +54,13 @@ def build_feature_model(dataset,
         states1, hidden1 = tf.nn.dynamic_rnn(cell, t_in, dtype=tf.float32)
     t_hidden = hidden1
     t_msg = tf.nn.relu(net.linear(t_hidden, n_comm))
+    if discrete:
+        t_msg_discrete = tf.one_hot(tf.argmax(t_msg, axis=1),
+                                    depth=n_comm)
 
     # Decoder makes independent predictions for each set of object features
-    t_expand_msg = tf.expand_dims(t_msg, axis=1)
+    t_expand_msg = tf.expand_dims(
+        t_msg_discrete if discrete else t_msg, axis=1)
     t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
     t_out_feats = tf.concat((t_tile_message, t_features), axis=2)
     t_pred = tf.squeeze(
@@ -248,8 +250,11 @@ if __name__ == "__main__":
     save_opts = parser.add_argument_group('save messages')
     save_opts.add_argument('--no_save_msgs', action='store_true',
                            help='Don\'t save comptued messages after testing')
-    save_opts.add_argument('--msgs_file', default='{data}-{model}-msgs.npz',
-                           help='Save location (can use parser options)')
+    save_opts.add_argument(
+        '--msgs_file',
+        default='{data}-{model}-{rnn_cell}-{comm_type}{n_comm}-'
+                '{epochs}epochs-msgs.npz',
+        help='Save location (can use parser options)')
     save_opts.add_argument('--save_max', type=int, default=None,
                            help='Maximum number of messages to save')
 
@@ -431,7 +436,7 @@ if __name__ == "__main__":
         all_relation_dirs = all_relation_dirs[:args.save_max]
 
     if not args.no_save_msgs:
-        print("Saving model predictions")
+        print("Saving {} model predictions".format(all_msgs.shape[0]))
         np.savez(args.msgs_file.format(**vars(args)),
                  msgs=all_msgs,
                  preds=all_preds,
