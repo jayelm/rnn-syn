@@ -52,6 +52,9 @@ TEXTURES = ['solid']
 TEXTURES_MAP = invert(dict(enumerate(TEXTURES)))
 
 Scene = namedtuple('Scene', ['worlds', 'labels', 'relation', 'relation_dir'])
+AsymScene = namedtuple('AsymScene', ['speaker_worlds', 'speaker_labels',
+                                     'listener_worlds', 'listener_labels',
+                                     'relation', 'relation_dir'])
 SWorld = namedtuple('SWorld', ['image', 'shapes'])
 Shape = namedtuple('Shape',
                    ['name', 'color', 'size', 'center', 'rotation', 'texture'])
@@ -138,6 +141,26 @@ def flatten_scene(scene):
     return Scene(worlds=new_worlds, labels=scene.labels,
                  relation=scene.relation,
                  relation_dir=scene.relation_dir)
+
+
+def flatten_asym_scene(scene):
+    """Flatten an asym scene to make it tf-compatible"""
+    new_speaker_worlds = [
+        SWorld(image=s.image,
+               shapes=flatten_shapes(s.shapes))
+        for s in scene.speaker_worlds
+    ]
+    new_listener_worlds = [
+        SWorld(image=s.image,
+               shapes=flatten_shapes(s.shapes))
+        for s in scene.listener_worlds
+    ]
+    return AsymScene(speaker_worlds=new_speaker_worlds,
+                     speaker_labels=scene.speaker_labels,
+                     listener_worlds=new_listener_worlds,
+                     listener_labels=scene.listener_labels,
+                     relation=scene.relation,
+                     relation_dir=scene.relation_dir)
 
 
 def flatten_shapes(shapes):
@@ -415,12 +438,81 @@ class SpatialExtraSimple(CaptionAgreementDataset):
 
     def generate(self, max, noise_range=0.0,
                  n_targets=2,
-                 n_distractors=1):
+                 n_distractors=1,
+                 asym=False, asym_args=None):
+        if asym_args is None:
+            asym_args = {
+                'max_images': 5,
+                'min_targets': 2,
+                'min_distractors': 1
+            }
         targets, distractors = self.generate_targets_distractors(
             max, noise_range=noise_range)
-        return self.combine_targets_distractors(
-            targets, distractors,
-            n_targets=n_targets, n_distractors=n_distractors)
+        if asym:
+            return self.combine_targets_distractors_asym(
+                targets, distractors, **asym_args)
+        else:
+            return self.combine_targets_distractors(
+                targets, distractors,
+                n_targets=n_targets, n_distractors=n_distractors)
+
+    def sample_asym(self, max_images, min_targets, min_distractors):
+        # Sample a random number of targets between min_targets and
+        # max_images - min_distractors
+        n_targets = random.randint(
+            min_targets, max_images - min_distractors + 1)
+        n_left = max_images - n_targets
+        assert n_left >= min_distractors
+        # Sample a number of distractors between min_distractors and
+        # the number of possible images left
+        n_distractors = random.randint(
+            min_distractors, n_left + 1)
+        assert (n_targets + n_distractors) <= max_images
+        return n_targets, n_distractors
+
+    def combine_targets_distractors_asym(self, targets, distractors,
+                                         max_images=5,
+                                         min_targets=2,
+                                         min_distractors=1):
+        if min_targets + min_distractors > max_images:
+            raise ValueError("Min targets + min distractors > max images")
+        if min_targets + min_distractors == max_images:
+            print("Warning: min_targets + min_distractors == max_images, "
+                  "will always produce scenes with `max_images` images")
+        asym_scenes = []
+        try:
+            while True:
+                n_targets_speaker, n_distractors_speaker = self.sample_asym(
+                    max_images, min_targets, min_distractors)
+                n_targets_listener, n_distractors_listener = self.sample_asym(
+                    max_images, min_targets, min_distractors)
+                speaker_targets = [(targets.pop(), 1)
+                                   for _ in range(n_targets_speaker)]
+                speaker_distractors = [(distractors.pop(), 1)
+                                       for _ in range(n_distractors_speaker)]
+                listener_targets = [(targets.pop(), 1)
+                                    for _ in range(n_targets_listener)]
+                listener_distractors = [(distractors.pop(), 1)
+                                        for _ in range(n_distractors_listener)]
+                speaker_combs = speaker_targets + speaker_distractors
+                listener_combs = listener_targets + listener_distractors
+                random.shuffle(speaker_combs)
+                random.shuffle(listener_combs)
+                speaker_sworlds, speaker_labels = zip(*speaker_combs)
+                listener_sworlds, listener_labels = zip(*listener_combs)
+                speaker_sworlds = list(map(to_sworld, speaker_sworlds))
+                listener_sworlds = list(map(to_sworld, listener_sworlds))
+                scene = AsymScene(speaker_worlds=speaker_sworlds,
+                                  speaker_labels=np.array(speaker_labels),
+                                  listener_worlds=listener_sworlds,
+                                  listener_labels=np.array(listener_labels),
+                                  relation=self.relation,
+                                  relation_dir=self.relation_dir)
+                scene = flatten_asym_scene(scene)
+                asym_scenes.append(scene)
+        except IndexError:
+            assert not targets or not distractors
+            return asym_scenes
 
     def combine_targets_distractors(self,
                                     targets,
@@ -592,10 +684,11 @@ def gen_dataset(iargs):
         t = time.time()
         print("{} Started".format(i))
         sys.stdout.flush()
-    n, max_n, n_targets, n_distractors, save_folder = args
+    n, max_n, n_targets, n_distractors, save_folder, asym, asym_args = args
     dataset = SpatialExtraSimple()
     train = dataset.generate(
-        max_n, n_targets=n_targets, n_distractors=n_distractors)
+        max_n, n_targets=n_targets, n_distractors=n_distractors,
+        asym=asym, asym_args=asym_args)
     if i is not None:
         print("{} Finished ({}s)".format(i, round(time.time() - t, 2)))
         sys.stdout.flush()
@@ -638,8 +731,13 @@ if __name__ == "__main__":
         default=1,
         help='Number of distractors per scene')
     parser.add_argument(
+        '--asym',
+        action='store_true',
+        help='Construct scenes with different (random) images on '
+             'speaker/listener side')
+    parser.add_argument(
         '--save_folder',
-        default='data/{n_configs}_{samples_each_config}',
+        default='data/{n_configs}_{samples_each_config}_asym{asym}',
         help='Save folder (can use other args)')
     parser.add_argument(
         '--n_cpu',
@@ -659,6 +757,18 @@ if __name__ == "__main__":
         action='store_true',
         help='Compress (tar.gz) data after generating')
 
+    asym_args = parser.add_argument_group('Asym args',
+                                          'options for asymmetric worlds')
+    asym_args.add_argument(
+        '--asym_max_images', default=5, type=int,
+        help='Maximum images in each asymmetric world')
+    asym_args.add_argument(
+        '--asym_min_targets', default=2, type=int,
+        help='Minimum targets in each asymmetric world')
+    asym_args.add_argument(
+        '--asym_min_distractors', default=1, type=int,
+        help='Minimum distractors in each asymmetric world')
+
     args = parser.parse_args()
 
     # Check save folder.
@@ -677,9 +787,16 @@ if __name__ == "__main__":
             sys.exit(0)
     os.mkdir(save_folder)
 
+    asym_args = {
+        'max_images': args.asym_max_images,
+        'min_targets': args.asym_min_targets,
+        'min_distractors': args.asym_min_distractors,
+    }
+
     print("Generating data")
     args1 = (args.samples_each_config, args.n_targets,
-             args.n_distractors, save_folder)
+             args.n_distractors, save_folder,
+             args.asym, asym_args)
     # Index the datasets by config
     dataset_args = [(i, ) + args1 for i in range(args.n_configs)]
 
@@ -702,8 +819,10 @@ if __name__ == "__main__":
         'n': sum(d['n'] for d in dataset_metas),
         'n_configs': args.n_configs,
         'samples_each_config': args.samples_each_config,
-        'n_targets': args.n_targets,
-        'n_distractors': args.n_distractors,
+        'n_targets': None if args.asym else args.n_targets,
+        'n_distractors': None if args.asym else args.n_distractors,
+        'asym': True,
+        'asym_args': None if not args.asym else asym_args,
         'configs': dataset_metas
     }
     with open(os.path.join(save_folder, 'metadata.json'), 'w') as fout:
