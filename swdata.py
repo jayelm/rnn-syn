@@ -488,11 +488,11 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                     max_images, min_targets, min_distractors)
                 speaker_targets = [(targets.pop(), 1)
                                    for _ in range(n_targets_speaker)]
-                speaker_distractors = [(distractors.pop(), 1)
+                speaker_distractors = [(distractors.pop(), 0)
                                        for _ in range(n_distractors_speaker)]
                 listener_targets = [(targets.pop(), 1)
                                     for _ in range(n_targets_listener)]
-                listener_distractors = [(distractors.pop(), 1)
+                listener_distractors = [(distractors.pop(), 0)
                                         for _ in range(n_distractors_listener)]
                 speaker_combs = speaker_targets + speaker_distractors
                 listener_combs = listener_targets + listener_distractors
