@@ -6,7 +6,7 @@ import net
 import tensorflow as tf
 import numpy as np
 import swdata
-from swdata import Scene, SWorld
+from swdata import AsymScene, Scene, SWorld
 import sys
 import time
 
@@ -17,17 +17,18 @@ RNN_CELLS = {
 }
 
 
+assert AsymScene
 assert Scene
 assert SWorld
 
 
-def build_feature_model(dataset,
-                        n_images,
+def build_feature_model(n_images,
                         max_shapes,
                         n_attrs,
                         net_arch=(256, 64),
                         discrete=False,
-                        rnncell=tf.contrib.rnn.GRUCell):
+                        rnncell=tf.contrib.rnn.GRUCell,
+                        asym=False):
     """
     Return an encoder-decoder model that uses the raw feature representation
     of ShapeWorld microworlds for communication. This is exactly the model used
@@ -41,6 +42,12 @@ def build_feature_model(dataset,
 
     # Whether an image is the target
     t_labels = tf.placeholder(tf.float32, (None, n_images))
+
+    if asym:
+        # Listener sees separate labels and features
+        t_features_l = tf.placeholder(tf.float32,
+                                      (None, n_images, n_image_features))
+        t_labels_l = tf.placeholder(tf.float32, (None, n_images))
 
     # Encoder observes both object features and target labels
     t_labels_exp = tf.expand_dims(t_labels, axis=2)
@@ -62,23 +69,38 @@ def build_feature_model(dataset,
     t_expand_msg = tf.expand_dims(
         t_msg_discrete if discrete else t_msg, axis=1)
     t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
-    t_out_feats = tf.concat((t_tile_message, t_features), axis=2)
+
+    if asym:  # Encode listener features
+        t_out_feats = tf.concat((t_tile_message, t_features_l), axis=2)
+    else:
+        t_out_feats = tf.concat((t_tile_message, t_features), axis=2)
+
     t_pred = tf.squeeze(
         net.mlp(t_out_feats, (n_hidden, 1), (tf.nn.relu, None)))
-    t_loss = tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(
-            labels=t_labels, logits=t_pred))
 
-    return (t_features, t_labels,
-            (t_msg_discrete if discrete else t_msg),
-            t_pred, t_loss)
+    if asym:  # Loss wrt listener labels
+        t_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(
+                labels=t_labels_l, logits=t_pred))
+        return (t_features, t_labels,
+                t_features_l, t_labels_l,
+                (t_msg_discrete if discrete else t_msg),
+                t_pred, t_loss)
+    else:
+        t_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(
+                labels=t_labels, logits=t_pred))
+        return (t_features, t_labels,
+                (t_msg_discrete if discrete else t_msg),
+                t_pred, t_loss)
 
 
-def build_end2end_model(dataset, n_images,
+def build_end2end_model(n_images,
                         image_dim=(64, 64, 3),
                         net_arch=(256, 64, 1024),
                         discrete=False,
-                        rnncell=tf.contrib.rnn.GRUCell):
+                        rnncell=tf.contrib.rnn.GRUCell,
+                        asym=False):
     """
     Return an encoder-decoder model that uses raw ShapeWorld images
 
@@ -102,6 +124,13 @@ def build_end2end_model(dataset, n_images,
     # Whether an image is the target
     t_labels = tf.placeholder(tf.float32, (None, n_images))
 
+    if asym:
+        # Listener observes own features/labels
+        t_features_raw_l = tf.placeholder(tf.float32,
+                                          (None, n_images) + image_dim)
+        t_labels_l = tf.placeholder(tf.float32, (None, n_images))
+
+
     # Encoder observes both object features and target labels
     t_labels_exp = tf.expand_dims(t_labels, axis=2)
     t_in = tf.concat((t_features_toplevel_enc, t_labels_exp), axis=2)
@@ -123,18 +152,30 @@ def build_end2end_model(dataset, n_images,
     t_expand_msg = tf.expand_dims(t_msg_discrete if discrete else t_msg,
                                   axis=1)
     t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
-    t_features_toplevel_dec = net.convolve(t_features_raw, n_images,
-                                           n_toplevel_conv)
+    if asym:
+        t_features_toplevel_dec = net.convolve(t_features_raw_l, n_images,
+                                               n_toplevel_conv)
+    else:
+        t_features_toplevel_dec = net.convolve(t_features_raw, n_images,
+                                               n_toplevel_conv)
     t_out_feats = tf.concat((t_tile_message, t_features_toplevel_dec), axis=2)
     t_pred = tf.squeeze(net.mlp(t_out_feats, (n_hidden, 1),
                                 (tf.nn.relu, None)))
-    t_loss = tf.reduce_mean(
-        tf.nn.sigmoid_cross_entropy_with_logits(
-            labels=t_labels, logits=t_pred))
-
-    return (t_features_raw, t_labels,
-            (t_msg_discrete if discrete else t_msg),
-            t_pred, t_loss)
+    if asym:
+        t_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(
+                labels=t_labels_l, logits=t_pred))
+        return (t_features_raw, t_labels,
+                t_features_raw_l, t_labels_l,
+                (t_msg_discrete if discrete else t_msg),
+                t_pred, t_loss)
+    else:
+        t_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(
+                labels=t_labels, logits=t_pred))
+        return (t_features_raw, t_labels,
+                (t_msg_discrete if discrete else t_msg),
+                t_pred, t_loss)
 
 
 def gen_dataset(iargs):
@@ -273,6 +314,11 @@ if __name__ == "__main__":
     print("Loading data")
     train, metadata = swdata.load_scenes(args.data, gz=True)
 
+    asym = False
+    if 'asym' in metadata and metadata['asym']:
+        print("Asymmetric dataset detected")
+        asym = True
+
     # Do a split
     if args.test:
         # Keep unique configs only
@@ -306,32 +352,53 @@ if __name__ == "__main__":
     else:
         # Just train on everything
         train = swdata.flatten(train)
+        random.shuffle(train)
 
-    max_images = metadata['n_targets'] + metadata['n_distractors']
+    if asym:
+        max_images = metadata['asym_args']['max_images']
+        n_attrs = len(train[0].speaker_worlds[0].shapes[0])
+    else:
+        max_images = metadata['n_targets'] + metadata['n_distractors']
+        n_attrs = len(train[0].worlds[0].shapes[0])
+
+    # Hardcoded for now
     max_shapes = 2
-    n_attrs = len(train[0].worlds[0].shapes[0])
-
-    # Throw out duplicate configs?
 
     print("Building model")
     if args.model == 'feature':
-        t_features, t_labels, t_msg, t_pred, t_loss = build_feature_model(
-            train,
-            max_images,
-            max_shapes,
-            n_attrs,
-            net_arch=(args.n_hidden, args.n_comm),
-            discrete=args.comm_type == 'discrete')
+        if asym:
+            tfs, tls, tfl, tll, t_msg, t_pred, t_loss = build_feature_model(
+                max_images,
+                max_shapes,
+                n_attrs,
+                net_arch=(args.n_hidden, args.n_comm),
+                discrete=args.comm_type == 'discrete',
+                asym=True)
+        else:
+            t_features, t_labels, t_msg, t_pred, t_loss = build_feature_model(
+                max_images,
+                max_shapes,
+                n_attrs,
+                net_arch=(args.n_hidden, args.n_comm),
+                discrete=args.comm_type == 'discrete',
+                asym=False)
     elif args.model == 'end2end':
-        t_features, t_labels, t_msg, t_pred, t_loss = build_end2end_model(
-            train,
-            max_images,
-            net_arch=(args.n_hidden, args.n_comm, 1024),
-            discrete=args.comm_type == 'discrete',
-            rnncell=RNN_CELLS[args.rnn_cell]
-        )
+        if asym:
+            tfs, tls, tfl, tll, t_msg, t_pred, t_loss = build_end2end_model(
+                max_images,
+                net_arch=(args.n_hidden, args.n_comm, 1024),
+                discrete=args.comm_type == 'discrete',
+                rnncell=RNN_CELLS[args.rnn_cell],
+                asym=True)
+        else:
+            t_features, t_labels, t_msg, t_pred, t_loss = build_end2end_model(
+                max_images,
+                net_arch=(args.n_hidden, args.n_comm, 1024),
+                discrete=args.comm_type == 'discrete',
+                rnncell=RNN_CELLS[args.rnn_cell],
+                asym=False)
     else:
-        raise RuntimeError
+        raise RuntimeError("Unknown model type {}".format(args.model))
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
     session = tf.Session()
@@ -355,17 +422,35 @@ if __name__ == "__main__":
             for batch in batches(
                     train, args.batch_size, max_data=args.max_data):
                 if args.model == 'feature':
-                    envs, labels = swdata.extract_envs_and_labels(
-                        batch, max_images, max_shapes, n_attrs)
+                    if asym:
+                        # Since we need to measure accuracy stats on listener
+                        # labels, keep name for those
+                        se, sl, envs, labels = swdata.extract_envs_and_labels(
+                            batch, max_images, max_shapes, n_attrs, asym=True)
+                    else:
+                        envs, labels = swdata.extract_envs_and_labels(
+                            batch, max_images, max_shapes, n_attrs, asym=False)
                 elif args.model == 'end2end':
-                    envs, labels = swdata.prepare_end2end(
-                        batch, max_images)
+                    if asym:
+                        se, sl, envs, labels = swdata.prepare_end2end(
+                            batch, max_images, asym=True)
+                    else:
+                        envs, labels = swdata.prepare_end2end(
+                            batch, max_images, asym=False)
                 else:
                     raise RuntimeError
-                l, preds, _ = session.run([t_loss, t_pred, o_train], {
-                    t_features: envs,
-                    t_labels: labels
-                })
+                if asym:
+                    l, preds, _ = session.run([t_loss, t_pred, o_train], {
+                        tfs: se,
+                        tls: sl,
+                        tfl: envs,
+                        tll: labels
+                    })
+                else:
+                    l, preds, _ = session.run([t_loss, t_pred, o_train], {
+                        t_features: envs,
+                        t_labels: labels
+                    })
 
                 match = (preds > 0) == labels
                 loss += l
@@ -394,16 +479,33 @@ if __name__ == "__main__":
 
     for batch in batches(test_or_train, args.batch_size):
         if args.model == 'feature':
-            batch_envs, batch_labels = swdata.extract_envs_and_labels(
-                batch, max_images, max_shapes, n_attrs)
+            if asym:
+                bse, bsl, batch_envs, batch_labels = \
+                    swdata.extract_envs_and_labels(
+                        batch, max_images, max_shapes, n_attrs, asym=True)
+            else:
+                batch_envs, batch_labels = swdata.extract_envs_and_labels(
+                    batch, max_images, max_shapes, n_attrs, asym=False)
         elif args.model == 'end2end':
-            batch_envs, batch_labels = swdata.prepare_end2end(
-                batch, max_images)
+            if asym:
+                bse, bsl, batch_envs, batch_labels = \
+                    swdata.prepare_end2end(batch, max_images, asym=True)
+            else:
+                batch_envs, batch_labels = swdata.prepare_end2end(
+                    batch, max_images, asym=False)
         else:
-            raise RuntimeError
+            raise RuntimeError("Unknown model {}".format(args.model))
 
-        batch_msgs, batch_preds = session.run([t_msg, t_pred], {
-            t_features: batch_envs, t_labels: batch_labels})
+        if asym:
+            batch_msgs, batch_preds = session.run([t_msg, t_pred], {
+                tfs: bse,
+                tls: bsl,
+                tfl: batch_envs,
+                tll: batch_labels
+            })
+        else:
+            batch_msgs, batch_preds = session.run([t_msg, t_pred], {
+                t_features: batch_envs, t_labels: batch_labels})
 
         all_msgs.extend(batch_msgs)
         all_preds.extend(batch_preds)

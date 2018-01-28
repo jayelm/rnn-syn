@@ -99,7 +99,7 @@ def load_scenes(folder, gz=True):
             except AttributeError:
                 raise RuntimeError(
                     "Can't find Scene/SWorld.\n"
-                    "   include `from swdata import Scene, SWorld`")
+                    "   include `from swdata import AsymScene, Scene, SWorld`")
             global_scenes.append(scenes)
     return global_scenes, metadata
 
@@ -184,18 +184,38 @@ def flatten_shape(shape):
                     dtype=np.float32)
 
 
-def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs):
+def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs, asym=False):
     """
     Given a list of scenes, return a list of tf-compatible feature reps and
     labels
     """
-    n_scenes = len(scenes)
+    if asym:
+        speaker_envs, speaker_labels = _features_from_scenes(
+            scenes, n_images, max_shapes, n_attrs,
+            props=['speaker_worlds', 'speaker_labels'])
+        listener_envs, listener_labels = _features_from_scenes(
+            scenes, n_images, max_shapes, n_attrs,
+            props=['listener_worlds', 'listener_labels'])
+        return speaker_envs, speaker_labels, listener_envs, listener_labels
+    else:
+        return _features_from_scenes(
+            scenes, n_images, max_shapes, n_attrs,
+            props=['worlds', 'labels'])
 
+
+def _features_from_scenes(scenes, n_images, max_shapes,
+                          n_attrs, props=('worlds', 'labels')):
+    """
+    Extract envs from a list of scenes, but can modify props for AsymScenes
+    """
+    n_scenes = len(scenes)
     envs = np.zeros((n_scenes, n_images, max_shapes * n_attrs))
     labels = np.zeros((n_scenes, n_images))
 
     for scene_i, scene in enumerate(scenes):
-        for world_i, wl in enumerate(zip(scene.worlds, scene.labels)):
+        worlds_prop = getattr(scene, props[0])
+        labels_prop = getattr(scene, props[1])
+        for world_i, wl in enumerate(zip(worlds_prop, labels_prop)):
             world, label = wl
             global_shape_i = 0
             for shape in world.shapes:
@@ -207,25 +227,45 @@ def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs):
     return envs, labels
 
 
-def prepare_end2end(scenes, n_images):
+def _end2end_from_scenes(scenes, n_images, props=('worlds', 'labels')):
     """
-    Given a list of scenes, return a list of tf-compatible feature reps and
-    labels
+    Extract images from a list of scenes, but can modify props for AsymScenes
     """
     n_scenes = len(scenes)
 
-    image_dim = scenes[0].worlds[0].image.shape
+    image_dim = getattr(scenes[0], props[0])[0].image.shape
 
     envs = np.zeros((n_scenes, n_images) + image_dim)
     labels = np.zeros((n_scenes, n_images))
 
     for scene_i, scene in enumerate(scenes):
-        for img_i, wl in enumerate(zip(scene.worlds, scene.labels)):
+        worlds_prop = getattr(scene, props[0])
+        labels_prop = getattr(scene, props[1])
+        for img_i, wl in enumerate(zip(worlds_prop, labels_prop)):
             world, label = wl
             envs[scene_i, img_i, :] = world.image
             labels[scene_i, img_i] = label
 
     return envs, labels
+
+
+def prepare_end2end(scenes, n_images, asym=False):
+    """
+    Given a list of scenes, return a list of tf-compatible feature reps and
+    labels
+    """
+    if asym:
+        speaker_envs, speaker_labels = _end2end_from_scenes(
+            scenes, n_images,
+            props=['speaker_worlds', 'speaker_labels'])
+        listener_envs, listener_labels = _end2end_from_scenes(
+            scenes, n_images,
+            props=['listener_worlds', 'listener_labels'])
+        return speaker_envs, speaker_labels, listener_envs, listener_labels
+    else:
+        return _end2end_from_scenes(
+            scenes, n_images,
+            props=['worlds', 'labels'])
 
 
 class FixedWorldGenerator(RandomAttributesGenerator):
