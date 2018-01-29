@@ -9,6 +9,7 @@ import swdata
 from swdata import AsymScene, Scene, SWorld
 import sys
 import time
+from tensorflow.python import debug as tf_debug
 
 
 RNN_CELLS = {
@@ -233,6 +234,11 @@ if __name__ == "__main__":
         default='end2end',
         help='Model type')
 
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Use tensorflow debugger')
+
     data_opts = parser.add_argument_group('data', 'options for data gen')
     data_opts.add_argument(
         '--data',
@@ -421,6 +427,9 @@ if __name__ == "__main__":
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
     session = tf.Session()
+    if args.debug:
+        session = tf_debug.LocalCLIDebugWrapperSession(
+            session, dump_root='/local/scratch/jlm95/tfdbg/')
     session.run(tf.global_variables_initializer())
 
     if args.tensorboard:
@@ -428,7 +437,6 @@ if __name__ == "__main__":
         tf.summary.FileWriter(args.tensorboard_save,
                               graph=tf.get_default_graph())
         print("Exiting")
-        import ipdb; ipdb.set_trace()
         sys.exit(0)
 
     # ==== TRAIN ====
