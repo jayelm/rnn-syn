@@ -60,10 +60,10 @@ def build_feature_model(n_images,
     with tf.variable_scope("enc1"):
         states1, hidden1 = tf.nn.dynamic_rnn(cell, t_in, dtype=tf.float32)
     t_hidden = hidden1
-    t_msg = tf.nn.relu(net.linear(t_hidden, n_comm))
+    t_msg = tf.nn.relu(net.linear(t_hidden, n_comm, 'linear_speaker'))
     if discrete:
         t_msg_discrete = tf.one_hot(tf.argmax(t_msg, axis=1),
-                                    depth=n_comm)
+                                    depth=n_comm, name='discretize')
 
     # Decoder makes independent predictions for each set of object features
     t_expand_msg = tf.expand_dims(
@@ -116,24 +116,30 @@ def build_end2end_model(n_images,
 
     # The raw image representation, of shape n_images * image_dim
     t_features_raw = tf.placeholder(tf.float32,
-                                    (None, n_images) + image_dim)
+                                    (None, n_images) + image_dim,
+                                    name='features_speaker')
 
     t_features_toplevel_enc = net.convolve(t_features_raw, n_images,
-                                           n_toplevel_conv)
+                                           n_toplevel_conv,
+                                           'conv_speaker')
 
     # Whether an image is the target
-    t_labels = tf.placeholder(tf.float32, (None, n_images))
+    t_labels = tf.placeholder(tf.float32, (None, n_images),
+                              name='labels_speaker')
 
     if asym:
         # Listener observes own features/labels
         t_features_raw_l = tf.placeholder(tf.float32,
-                                          (None, n_images) + image_dim)
-        t_labels_l = tf.placeholder(tf.float32, (None, n_images))
+                                          (None, n_images) + image_dim,
+                                          name='features_listener')
+        t_labels_l = tf.placeholder(tf.float32, (None, n_images),
+                                    name='labels_listener')
 
 
     # Encoder observes both object features and target labels
     t_labels_exp = tf.expand_dims(t_labels, axis=2)
-    t_in = tf.concat((t_features_toplevel_enc, t_labels_exp), axis=2)
+    t_in = tf.concat((t_features_toplevel_enc, t_labels_exp), axis=2,
+                     name='input_speaker')
 
     if rnncell == tf.contrib.rnn.LSTMCell:
         cell = rnncell(n_hidden, state_is_tuple=False)
@@ -142,29 +148,34 @@ def build_end2end_model(n_images,
     with tf.variable_scope("enc1"):
         states1, hidden1 = tf.nn.dynamic_rnn(cell, t_in, dtype=tf.float32)
     t_hidden = hidden1
-    t_msg = tf.nn.relu(net.linear(t_hidden, n_comm))
+    t_msg = tf.nn.relu(net.linear(t_hidden, n_comm, 'linear_speaker'), name='message')
 
     if discrete:
         t_msg_discrete = tf.one_hot(tf.argmax(t_msg, axis=1),
-                                    depth=n_comm)
+                                    depth=n_comm, name='message_discrete')
 
     # Decoder makes independent predictions for each set of object features
-    t_expand_msg = tf.expand_dims(t_msg_discrete if discrete else t_msg,
-                                  axis=1)
-    t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
+    with tf.name_scope('message_process'):
+        t_expand_msg = tf.expand_dims(t_msg_discrete if discrete else t_msg,
+                                      axis=1)
+        t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
+
     if asym:
         t_features_toplevel_dec = net.convolve(t_features_raw_l, n_images,
-                                               n_toplevel_conv)
+                                               n_toplevel_conv, 'conv_listener')
     else:
         t_features_toplevel_dec = net.convolve(t_features_raw, n_images,
-                                               n_toplevel_conv)
-    t_out_feats = tf.concat((t_tile_message, t_features_toplevel_dec), axis=2)
+                                               n_toplevel_conv, 'conv_listener')
+    t_out_feats = tf.concat((t_tile_message, t_features_toplevel_dec), axis=2,
+                            name='input_listener')
     t_pred = tf.squeeze(net.mlp(t_out_feats, (n_hidden, 1),
-                                (tf.nn.relu, None)))
+                                (tf.nn.relu, None)),
+                        name='prediction')
     if asym:
         t_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(
-                labels=t_labels_l, logits=t_pred))
+                labels=t_labels_l, logits=t_pred),
+            name='loss')
         return (t_features_raw, t_labels,
                 t_features_raw_l, t_labels_l,
                 (t_msg_discrete if discrete else t_msg),
@@ -246,6 +257,14 @@ if __name__ == "__main__":
         default='gru',
         choices=['lstm', 'gru'],
         help='RNN Cell type')
+    net_opts.add_argument(
+        '--tensorboard',
+        action='store_true',
+        help='Save tensorboard graph, don\'t do anything else')
+    net_opts.add_argument(
+        '--tensorboard_save',
+        default='./rnn-syn-graph',
+        help='Tensorboard graph save file')
 
     train_opts = parser.add_argument_group('train', 'options for net training')
     train_opts.add_argument(
@@ -404,6 +423,14 @@ if __name__ == "__main__":
     session = tf.Session()
     session.run(tf.global_variables_initializer())
 
+    if args.tensorboard:
+        print("Saving logs to {}".format(args.tensorboard_save))
+        tf.summary.FileWriter(args.tensorboard_save,
+                              graph=tf.get_default_graph())
+        print("Exiting")
+        import ipdb; ipdb.set_trace()
+        sys.exit(0)
+
     # ==== TRAIN ====
     if args.restore:
         saver = tf.train.Saver()
@@ -536,6 +563,18 @@ if __name__ == "__main__":
         all_labels = all_labels[:args.save_max]
         all_relations = all_relations[:args.save_max]
         all_relation_dirs = all_relation_dirs[:args.save_max]
+
+    # broadcast the input message over scenes
+    #  tile_msg = np.asarray([msg for _ in range(n_sample)])
+    # sample environments from the given scene ids
+    # In this case - we need our own "theories". Or just sample a bunch, and
+    # greenlight/badlight em so we can see what the messages mean
+    # In particular, we may need to do clustering on the messages.
+    # Actually, we may want to cluster the messages in ipynb, once we've analyzed
+    # Then we can add a --eval_msgs argument to this script
+    #  envs, _ = sample_annotated(dataset, random.choice(scene_ids, size=n_sample).tolist())
+    # This is used to eval messages given labels - find @ rnn-syn.ipynb
+    #  model_preds, = session.run([t_pred], {t_features: envs, t_msg: tile_msg})
 
     if not args.no_save_msgs:
         print("Saving {} model predictions".format(all_msgs.shape[0]))
