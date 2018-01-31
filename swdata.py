@@ -184,7 +184,8 @@ def flatten_shape(shape):
                     dtype=np.float32)
 
 
-def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs, asym=False):
+def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs, asym=False,
+                            shuffle=True):
     """
     Given a list of scenes, return a list of tf-compatible feature reps and
     labels
@@ -196,11 +197,20 @@ def extract_envs_and_labels(scenes, n_images, max_shapes, n_attrs, asym=False):
         listener_envs, listener_labels = _features_from_scenes(
             scenes, n_images, max_shapes, n_attrs,
             props=['listener_worlds', 'listener_labels'])
+        if shuffle:
+            speaker_envs, speaker_labels = shuffle_envs_labels(
+                speaker_envs, speaker_labels)
+            listener_envs, listener_labels = shuffle_envs_labels(
+                listener_envs, listener_labels)
         return speaker_envs, speaker_labels, listener_envs, listener_labels
     else:
-        return _features_from_scenes(
+        envs, labels = _features_from_scenes(
             scenes, n_images, max_shapes, n_attrs,
             props=['worlds', 'labels'])
+        if shuffle:
+            envs, labels = shuffle_envs_labels(envs, labels)
+        return envs, labels
+
 
 
 def _features_from_scenes(scenes, n_images, max_shapes,
@@ -249,7 +259,23 @@ def _end2end_from_scenes(scenes, n_images, props=('worlds', 'labels')):
     return envs, labels
 
 
-def prepare_end2end(scenes, n_images, asym=False):
+def shuffle_envs_labels(envs, labels):
+    new_envs = np.zeros_like(envs)
+    new_labels = np.zeros_like(labels)
+    world_seq = list(range(envs[0].shape[0]))
+    # Loop through each world (env/label) in the batch
+    for env_i, (env, label) in enumerate(zip(envs, labels)):
+        # New sequence of worlds to retrieve from original envs/labels
+        random.shuffle(world_seq)
+        # Loop through new sequence, place this sequence in increasing order
+        # in new_envs/labels
+        for new_world_i, orig_world_i in enumerate(world_seq):
+            new_envs[env_i, new_world_i] = env[orig_world_i]
+            new_labels[env_i, new_world_i] = label[orig_world_i]
+    return new_envs, new_labels
+
+
+def prepare_end2end(scenes, n_images, asym=False, shuffle=True):
     """
     Given a list of scenes, return a list of tf-compatible feature reps and
     labels
@@ -261,11 +287,19 @@ def prepare_end2end(scenes, n_images, asym=False):
         listener_envs, listener_labels = _end2end_from_scenes(
             scenes, n_images,
             props=['listener_worlds', 'listener_labels'])
+        if shuffle:
+            speaker_envs, speaker_labels = shuffle_envs_labels(
+                speaker_envs, speaker_labels)
+            listener_envs, listener_labels = shuffle_envs_labels(
+                listener_envs, listener_labels)
         return speaker_envs, speaker_labels, listener_envs, listener_labels
     else:
-        return _end2end_from_scenes(
+        envs, labels = _end2end_from_scenes(
             scenes, n_images,
             props=['worlds', 'labels'])
+        if shuffle:
+            envs, labels = shuffle_envs_labels(envs, labels)
+        return envs, labels
 
 
 class FixedWorldGenerator(RandomAttributesGenerator):
