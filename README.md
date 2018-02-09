@@ -19,11 +19,11 @@ This creates a folder, `data/{num_configs}_{samples_each_config}`, with a
 Then run
 
 ```bash
-python rnn-syn.py --data data/15_100 --test
+python rnn-syn.py --data data/15_100 --test --model end2end
 ```
 
-to train a model on some configurations and report test accuracy on unseen
-configurations with a 70/30 split.
+to train an end-to-end model on some configurations and report test accuracy on
+unseen configurations with a 70/30 split.
 
 There are several options for specifying the model architecture, communication
 protocol, dataset, and testing (or not testing) specific aspects of
