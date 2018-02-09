@@ -1,5 +1,7 @@
 # Learning compositional communication protocols in end-to-end reference games
 
+Requires Python 3.4+, and [ShapeWorld](https://github.com/AlexKuhnle/ShapeWorld), among other things.
+
 ## Model training
 
 To generate a spatial relations dataset, use `swdata.py`:
