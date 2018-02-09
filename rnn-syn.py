@@ -10,6 +10,7 @@ from swdata import AsymScene, Scene, SWorld
 import sys
 import time
 from tensorflow.python import debug as tf_debug
+from collections import namedtuple
 
 
 RNN_CELLS = {
@@ -21,6 +22,9 @@ RNN_CELLS = {
 assert AsymScene
 assert Scene
 assert SWorld
+
+
+TrainEx = namedtuple('TrainEx', ['world', 'metadata'])
 
 
 def build_feature_model(n_images,
@@ -358,7 +362,7 @@ if __name__ == "__main__":
                                    config_md['relation_dir'])
                 if config_hashable not in seen_configs:
                     seen_configs.add(config_hashable)
-                    unique_sets.append(config_data)
+                    unique_sets.append(TrainEx(config_data, config_md))
             random.shuffle(unique_sets)
             train, test = swdata.train_test_split(unique_sets,
                                                   test_split=args.test_split)
@@ -367,6 +371,7 @@ if __name__ == "__main__":
             random.shuffle(train)
             random.shuffle(test)
         else:
+            train = list(map(TrainEx, zip(train, metadata['configs'])))
             train, test = swdata.train_test_split(train,
                                                   test_split=args.test_split)
             train = swdata.flatten(train)
@@ -376,15 +381,16 @@ if __name__ == "__main__":
         print("Train:", len(train), "Test:", len(test))
     else:
         # Just train on everything
+        train = list(map(TrainEx, zip(train, metadata['configs'])))
         train = swdata.flatten(train)
         random.shuffle(train)
 
     if asym:
         max_images = metadata['asym_args']['max_images']
-        n_attrs = len(train[0].speaker_worlds[0].shapes[0])
+        n_attrs = len(train[0].world.speaker_worlds[0].shapes[0])
     else:
         max_images = metadata['n_targets'] + metadata['n_distractors']
-        n_attrs = len(train[0].worlds[0].shapes[0])
+        n_attrs = len(train[0].world.worlds[0].shapes[0])
 
     # Hardcoded for now
     max_shapes = 2
@@ -456,6 +462,7 @@ if __name__ == "__main__":
             random.shuffle(train)
             for batch in batches(
                     train, args.batch_size, max_data=args.max_data):
+                batch, batch_metadata = zip(*batch)
                 if args.model == 'feature':
                     if asym:
                         # Since we need to measure accuracy stats on listener
@@ -513,6 +520,7 @@ if __name__ == "__main__":
     all_relation_dirs = []
 
     for batch in batches(test_or_train, args.batch_size):
+        batch, batch_metadata = zip(*batch)
         if args.model == 'feature':
             if asym:
                 bse, bsl, batch_envs, batch_labels = \

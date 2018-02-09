@@ -104,7 +104,13 @@ def load_scenes(folder, gz=True):
     return global_scenes, metadata
 
 
-def flatten(l):
+def flatten(l, with_metadata=False):
+    if with_metadata:
+        flat = []
+        for sublist, md in l:
+            for item in sublist:
+                flat.append((item, md))
+        return flat
     return [item for sublist in l for item in sublist]
 
 
