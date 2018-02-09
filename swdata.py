@@ -72,6 +72,10 @@ VOCABULARY = sorted([
 ])
 
 
+# Used for training
+TrainEx = namedtuple('TrainEx', ['world', 'metadata'])
+
+
 def pickle_scenes(scenes, save_file='data/dataset.pkl', gz=True):
     if save_file == 'data/dataset.pkl' and gz:
         save_file += '.gz'
@@ -109,7 +113,7 @@ def flatten(l, with_metadata=False):
         flat = []
         for sublist, md in l:
             for item in sublist:
-                flat.append((item, md))
+                flat.append(TrainEx(item, md))
         return flat
     return [item for sublist in l for item in sublist]
 

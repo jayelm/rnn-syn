@@ -6,11 +6,15 @@ import net
 import tensorflow as tf
 import numpy as np
 import swdata
-from swdata import AsymScene, Scene, SWorld
+from swdata import (
+    AsymScene, Scene, SWorld, TrainEx,
+    COLORS_MAP, NAMES_MAP
+)
 import sys
 import time
 from tensorflow.python import debug as tf_debug
 from collections import namedtuple
+import pandas as pd
 
 
 RNN_CELLS = {
@@ -22,9 +26,7 @@ RNN_CELLS = {
 assert AsymScene
 assert Scene
 assert SWorld
-
-
-TrainEx = namedtuple('TrainEx', ['world', 'metadata'])
+assert TrainEx
 
 
 def build_feature_model(n_images,
@@ -323,7 +325,7 @@ if __name__ == "__main__":
     save_opts.add_argument(
         '--msgs_file',
         default='{data}-{model}-{rnn_cell}-{comm_type}{n_comm}-'
-                '{epochs}epochs-msgs.npz',
+                '{epochs}epochs-msgs.pkl',
         help='Save location (can use parser options)')
     save_opts.add_argument('--save_max', type=int, default=None,
                            help='Maximum number of messages to save')
@@ -362,27 +364,27 @@ if __name__ == "__main__":
                                    config_md['relation_dir'])
                 if config_hashable not in seen_configs:
                     seen_configs.add(config_hashable)
-                    unique_sets.append(TrainEx(config_data, config_md))
+                    unique_sets.append((config_data, config_md))
             random.shuffle(unique_sets)
             train, test = swdata.train_test_split(unique_sets,
                                                   test_split=args.test_split)
-            train = swdata.flatten(train)
-            test = swdata.flatten(test)
-            random.shuffle(train)
+            train = swdata.flatten(train, with_metadata=True)
+            test = swdata.flatten(test, with_metadata=True)
+            random.shuffle(train, )
             random.shuffle(test)
         else:
             train = list(map(TrainEx, zip(train, metadata['configs'])))
             train, test = swdata.train_test_split(train,
                                                   test_split=args.test_split)
-            train = swdata.flatten(train)
-            test = swdata.flatten(test)
+            train = swdata.flatten(train, with_metadata=True)
+            test = swdata.flatten(test, with_metadata=True)
             random.shuffle(train)
             random.shuffle(test)
         print("Train:", len(train), "Test:", len(test))
     else:
         # Just train on everything
         train = list(map(TrainEx, zip(train, metadata['configs'])))
-        train = swdata.flatten(train)
+        train = swdata.flatten(train, with_metadata=True)
         random.shuffle(train)
 
     if asym:
@@ -513,11 +515,7 @@ if __name__ == "__main__":
     test_or_train = test if args.test else train
 
     # Eval test in batches too
-    all_msgs = []
-    all_preds = []
-    all_labels = []
-    all_relations = []
-    all_relation_dirs = []
+    all_records = []
 
     for batch in batches(test_or_train, args.batch_size):
         batch, batch_metadata = zip(*batch)
@@ -550,35 +548,44 @@ if __name__ == "__main__":
             batch_msgs, batch_preds = session.run([t_msg, t_pred], {
                 t_features: batch_envs, t_labels: batch_labels})
 
-        all_msgs.extend(batch_msgs)
-        all_preds.extend(batch_preds)
-        all_labels.extend(batch_labels)
-        all_relations.extend(x.relation[0] for x in batch)
-        all_relation_dirs.extend(x.relation_dir for x in batch)
+        batch_records = zip(
+            batch_msgs,
+            batch_preds,
+            batch_labels,
+            (x.relation[0] for x in batch),
+            (x.relation_dir for x in batch),
+            (c['target'][0] for c in batch_metadata),
+            (c['target'][1] for c in batch_metadata),
+            (c['distractor'][0] for c in batch_metadata),
+            (c['distractor'][1] for c in batch_metadata),
+        )
+        batch_records = list(batch_records)  # TEMP
+        all_records.extend(batch_records)
 
-    all_msgs = np.array(all_msgs)
-    all_preds = np.array(all_preds)
-    all_labels = np.array(all_labels)
-    all_relations = np.array(all_relations)
-    all_relation_dirs = np.array(all_relation_dirs)
-
-    # To save space, coerce to boolean arrays
-    all_preds = (all_preds > 0).astype(np.bool)
-    all_labels = all_labels.astype(np.bool)
-    all_relations = (all_relations == 'y').astype(np.bool)
-    all_relation_dirs = (all_relation_dirs > 0).astype(np.bool)
+    import ipdb; ipdb.set_trace()
+    all_df = pd.DataFrame.from_records(
+        all_records,
+        columns=('msg', 'pred', 'obs', 'relation', 'relation_dir',
+                 'target_shape', 'target_color',
+                 'distractor_shape', 'distractor_color')
+    )
+    all_df.pred = all_df.pred.apply(lambda x: x > 0)
+    all_df.obs = all_df.obs.apply(lambda x: x.astype(np.bool))
+    all_df['correct'] = pd.Series(
+        map(lambda t: np.all(t[0] == t[1]), zip(all_df.pred, all_df.obs)),
+        dtype=np.bool
+    )
+    all_df.relation = all_df.relation.astype('category')
+    all_df.relation_dir = all_df.relation_dir > 0
+    for cat_col in ['target_shape', 'target_color',
+                    'distractor_shape', 'distractor_color']:
+        all_df[cat_col] = all_df[cat_col].astype('category')
 
     if args.test:  # Print test accuracy
-        match = all_preds == all_labels
-        hits = np.all(match, axis=1).sum()
-        print("Test accuracy: {}".format(hits / len(match)))
+        print("Test accuracy: {}".format(all_df.correct.mean()))
 
     if args.save_max is not None:
-        all_msgs = all_msgs[:args.save_max]
-        all_preds = all_preds[:args.save_max]
-        all_labels = all_labels[:args.save_max]
-        all_relations = all_relations[:args.save_max]
-        all_relation_dirs = all_relation_dirs[:args.save_max]
+        all_df = all_df.iloc[:args.save_max]
 
     # broadcast the input message over scenes
     #  tile_msg = np.asarray([msg for _ in range(n_sample)])
@@ -593,10 +600,5 @@ if __name__ == "__main__":
     #  model_preds, = session.run([t_pred], {t_features: envs, t_msg: tile_msg})
 
     if not args.no_save_msgs:
-        print("Saving {} model predictions".format(all_msgs.shape[0]))
-        np.savez(args.msgs_file.format(**vars(args)),
-                 msgs=all_msgs,
-                 preds=all_preds,
-                 obs=all_labels,
-                 relations=all_relations,
-                 relation_dirs=all_relation_dirs)
+        print("Saving {} model predictions".format(all_df.shape[0]))
+        all_df.to_pickle((args.msgs_file.format(**vars(args))))
