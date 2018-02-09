@@ -6,22 +6,16 @@ import net
 import tensorflow as tf
 import numpy as np
 import swdata
-from swdata import (
-    AsymScene, Scene, SWorld, TrainEx,
-    COLORS_MAP, NAMES_MAP
-)
+from swdata import AsymScene, Scene, SWorld, TrainEx
 import sys
 import time
 from tensorflow.python import debug as tf_debug
-from collections import namedtuple
 import pandas as pd
-
 
 RNN_CELLS = {
     'gru': tf.contrib.rnn.GRUCell,
     'lstm': tf.contrib.rnn.LSTMCell,
 }
-
 
 assert AsymScene
 assert Scene
@@ -69,8 +63,8 @@ def build_feature_model(n_images,
     t_hidden = hidden1
     t_msg = tf.nn.relu(net.linear(t_hidden, n_comm, 'linear_speaker'))
     if discrete:
-        t_msg_discrete = tf.one_hot(tf.argmax(t_msg, axis=1),
-                                    depth=n_comm, name='discretize')
+        t_msg_discrete = tf.one_hot(
+            tf.argmax(t_msg, axis=1), depth=n_comm, name='discretize')
 
     # Decoder makes independent predictions for each set of object features
     t_expand_msg = tf.expand_dims(
@@ -89,17 +83,14 @@ def build_feature_model(n_images,
         t_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(
                 labels=t_labels_l, logits=t_pred))
-        return (t_features, t_labels,
-                t_features_l, t_labels_l,
-                (t_msg_discrete if discrete else t_msg),
-                t_pred, t_loss)
+        return (t_features, t_labels, t_features_l, t_labels_l,
+                (t_msg_discrete if discrete else t_msg), t_pred, t_loss)
     else:
         t_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(
                 labels=t_labels, logits=t_pred))
-        return (t_features, t_labels,
-                (t_msg_discrete if discrete else t_msg),
-                t_pred, t_loss)
+        return (t_features, t_labels, (t_msg_discrete
+                                       if discrete else t_msg), t_pred, t_loss)
 
 
 def build_end2end_model(n_images,
@@ -122,31 +113,27 @@ def build_end2end_model(n_images,
     n_hidden, n_comm, n_toplevel_conv = net_arch
 
     # The raw image representation, of shape n_images * image_dim
-    t_features_raw = tf.placeholder(tf.float32,
-                                    (None, n_images) + image_dim,
-                                    name='features_speaker')
+    t_features_raw = tf.placeholder(
+        tf.float32, (None, n_images) + image_dim, name='features_speaker')
 
     t_features_toplevel_enc = net.convolve(t_features_raw, n_images,
-                                           n_toplevel_conv,
-                                           'conv_speaker')
+                                           n_toplevel_conv, 'conv_speaker')
 
     # Whether an image is the target
-    t_labels = tf.placeholder(tf.float32, (None, n_images),
-                              name='labels_speaker')
+    t_labels = tf.placeholder(
+        tf.float32, (None, n_images), name='labels_speaker')
 
     if asym:
         # Listener observes own features/labels
-        t_features_raw_l = tf.placeholder(tf.float32,
-                                          (None, n_images) + image_dim,
-                                          name='features_listener')
-        t_labels_l = tf.placeholder(tf.float32, (None, n_images),
-                                    name='labels_listener')
-
+        t_features_raw_l = tf.placeholder(
+            tf.float32, (None, n_images) + image_dim, name='features_listener')
+        t_labels_l = tf.placeholder(
+            tf.float32, (None, n_images), name='labels_listener')
 
     # Encoder observes both object features and target labels
     t_labels_exp = tf.expand_dims(t_labels, axis=2)
-    t_in = tf.concat((t_features_toplevel_enc, t_labels_exp), axis=2,
-                     name='input_speaker')
+    t_in = tf.concat(
+        (t_features_toplevel_enc, t_labels_exp), axis=2, name='input_speaker')
 
     if rnncell == tf.contrib.rnn.LSTMCell:
         cell = rnncell(n_hidden, state_is_tuple=False)
@@ -155,45 +142,45 @@ def build_end2end_model(n_images,
     with tf.variable_scope("enc1"):
         states1, hidden1 = tf.nn.dynamic_rnn(cell, t_in, dtype=tf.float32)
     t_hidden = hidden1
-    t_msg = tf.nn.relu(net.linear(t_hidden, n_comm, 'linear_speaker'), name='message')
+    t_msg = tf.nn.relu(
+        net.linear(t_hidden, n_comm, 'linear_speaker'), name='message')
 
     if discrete:
-        t_msg_discrete = tf.one_hot(tf.argmax(t_msg, axis=1),
-                                    depth=n_comm, name='message_discrete')
+        t_msg_discrete = tf.one_hot(
+            tf.argmax(t_msg, axis=1), depth=n_comm, name='message_discrete')
 
     # Decoder makes independent predictions for each set of object features
     with tf.name_scope('message_process'):
-        t_expand_msg = tf.expand_dims(t_msg_discrete if discrete else t_msg,
-                                      axis=1)
+        t_expand_msg = tf.expand_dims(
+            t_msg_discrete if discrete else t_msg, axis=1)
         t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
 
     if asym:
-        t_features_toplevel_dec = net.convolve(t_features_raw_l, n_images,
-                                               n_toplevel_conv, 'conv_listener')
+        t_features_toplevel_dec = net.convolve(
+            t_features_raw_l, n_images, n_toplevel_conv, 'conv_listener')
     else:
-        t_features_toplevel_dec = net.convolve(t_features_raw, n_images,
-                                               n_toplevel_conv, 'conv_listener')
-    t_out_feats = tf.concat((t_tile_message, t_features_toplevel_dec), axis=2,
-                            name='input_listener')
-    t_pred = tf.squeeze(net.mlp(t_out_feats, (n_hidden, 1),
-                                (tf.nn.relu, None)),
-                        name='prediction')
+        t_features_toplevel_dec = net.convolve(
+            t_features_raw, n_images, n_toplevel_conv, 'conv_listener')
+    t_out_feats = tf.concat(
+        (t_tile_message, t_features_toplevel_dec),
+        axis=2,
+        name='input_listener')
+    t_pred = tf.squeeze(
+        net.mlp(t_out_feats, (n_hidden, 1), (tf.nn.relu, None)),
+        name='prediction')
     if asym:
         t_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(
                 labels=t_labels_l, logits=t_pred),
             name='loss')
-        return (t_features_raw, t_labels,
-                t_features_raw_l, t_labels_l,
-                (t_msg_discrete if discrete else t_msg),
-                t_pred, t_loss)
+        return (t_features_raw, t_labels, t_features_raw_l, t_labels_l,
+                (t_msg_discrete if discrete else t_msg), t_pred, t_loss)
     else:
         t_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(
                 labels=t_labels, logits=t_pred))
-        return (t_features_raw, t_labels,
-                (t_msg_discrete if discrete else t_msg),
-                t_pred, t_loss)
+        return (t_features_raw, t_labels, (t_msg_discrete if discrete else
+                                           t_msg), t_pred, t_loss)
 
 
 def gen_dataset(iargs):
@@ -241,16 +228,11 @@ if __name__ == "__main__":
         help='Model type')
 
     parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Use tensorflow debugger')
+        '--debug', action='store_true', help='Use tensorflow debugger')
 
     data_opts = parser.add_argument_group('data', 'options for data gen')
     data_opts.add_argument(
-        '--data',
-        type=str,
-        required=True,
-        help='Folder of dataset to load')
+        '--data', type=str, required=True, help='Folder of dataset to load')
 
     net_opts = parser.add_argument_group('net', 'options for net architecture')
     net_opts.add_argument(
@@ -287,19 +269,21 @@ if __name__ == "__main__":
         default='saves/{data}-{model}-model.model',
         help='Restore filepath (can use parser options)')
     train_opts.add_argument(
-        '--save',
-        action='store_true',
-        help='Save model file')
+        '--save', action='store_true', help='Save model file')
     train_opts.add_argument(
         '--save_path',
         type=str,
         default='saves/{data}-{model}-model.model',
         help='Save model filepath (can use parser options)')
     train_opts.add_argument(
-        '--seed', type=int, default=None,
+        '--seed',
+        type=int,
+        default=None,
         help='Random seed (if none, picked randomly)')
     train_opts.add_argument(
-        '--tf_seed', type=int, default=None,
+        '--tf_seed',
+        type=int,
+        default=None,
         help='Random TensorFlow seed (by default, same as args.seed)')
     train_opts.add_argument(
         '--batch_size', type=int, default=128, help='Batch size')
@@ -312,23 +296,32 @@ if __name__ == "__main__":
         help='Max size of training data (rest discarded)')
 
     test_opts = parser.add_argument_group('train', 'options for net testing')
-    test_opts.add_argument('--test', action='store_true',
-                           help='do testing')
-    test_opts.add_argument('--test_split', type=float, default=0.2,
-                           help='%% of dataset to test on')
-    test_opts.add_argument('--test_no_unique', action='store_true',
-                           help='Don\'t require testing unique configs')
+    test_opts.add_argument('--test', action='store_true', help='do testing')
+    test_opts.add_argument(
+        '--test_split',
+        type=float,
+        default=0.2,
+        help='%% of dataset to test on')
+    test_opts.add_argument(
+        '--test_no_unique',
+        action='store_true',
+        help='Don\'t require testing unique configs')
 
     save_opts = parser.add_argument_group('save messages')
-    save_opts.add_argument('--no_save_msgs', action='store_true',
-                           help='Don\'t save comptued messages after testing')
+    save_opts.add_argument(
+        '--no_save_msgs',
+        action='store_true',
+        help='Don\'t save comptued messages after testing')
     save_opts.add_argument(
         '--msgs_file',
         default='{data}-{model}-{rnn_cell}-{comm_type}{n_comm}-'
-                '{epochs}epochs-msgs.pkl',
+        '{epochs}epochs-msgs.pkl',
         help='Save location (can use parser options)')
-    save_opts.add_argument('--save_max', type=int, default=None,
-                           help='Maximum number of messages to save')
+    save_opts.add_argument(
+        '--save_max',
+        type=int,
+        default=None,
+        help='Maximum number of messages to save')
 
     args = parser.parse_args()
 
@@ -366,16 +359,16 @@ if __name__ == "__main__":
                     seen_configs.add(config_hashable)
                     unique_sets.append((config_data, config_md))
             random.shuffle(unique_sets)
-            train, test = swdata.train_test_split(unique_sets,
-                                                  test_split=args.test_split)
+            train, test = swdata.train_test_split(
+                unique_sets, test_split=args.test_split)
             train = swdata.flatten(train, with_metadata=True)
             test = swdata.flatten(test, with_metadata=True)
             random.shuffle(train, )
             random.shuffle(test)
         else:
             train = list(map(TrainEx, zip(train, metadata['configs'])))
-            train, test = swdata.train_test_split(train,
-                                                  test_split=args.test_split)
+            train, test = swdata.train_test_split(
+                train, test_split=args.test_split)
             train = swdata.flatten(train, with_metadata=True)
             test = swdata.flatten(test, with_metadata=True)
             random.shuffle(train)
@@ -442,8 +435,8 @@ if __name__ == "__main__":
 
     if args.tensorboard:
         print("Saving logs to {}".format(args.tensorboard_save))
-        tf.summary.FileWriter(args.tensorboard_save,
-                              graph=tf.get_default_graph())
+        tf.summary.FileWriter(
+            args.tensorboard_save, graph=tf.get_default_graph())
         print("Exiting")
         sys.exit(0)
 
@@ -546,7 +539,9 @@ if __name__ == "__main__":
             })
         else:
             batch_msgs, batch_preds = session.run([t_msg, t_pred], {
-                t_features: batch_envs, t_labels: batch_labels})
+                t_features: batch_envs,
+                t_labels: batch_labels
+            })
 
         batch_records = zip(
             batch_msgs,
@@ -562,23 +557,22 @@ if __name__ == "__main__":
         batch_records = list(batch_records)  # TEMP
         all_records.extend(batch_records)
 
-    import ipdb; ipdb.set_trace()
     all_df = pd.DataFrame.from_records(
         all_records,
         columns=('msg', 'pred', 'obs', 'relation', 'relation_dir',
-                 'target_shape', 'target_color',
-                 'distractor_shape', 'distractor_color')
-    )
+                 'target_shape', 'target_color', 'distractor_shape',
+                 'distractor_color'))
     all_df.pred = all_df.pred.apply(lambda x: x > 0)
     all_df.obs = all_df.obs.apply(lambda x: x.astype(np.bool))
     all_df['correct'] = pd.Series(
         map(lambda t: np.all(t[0] == t[1]), zip(all_df.pred, all_df.obs)),
-        dtype=np.bool
-    )
+        dtype=np.bool)
     all_df.relation = all_df.relation.astype('category')
     all_df.relation_dir = all_df.relation_dir > 0
-    for cat_col in ['target_shape', 'target_color',
-                    'distractor_shape', 'distractor_color']:
+    for cat_col in [
+            'target_shape', 'target_color', 'distractor_shape',
+            'distractor_color'
+    ]:
         all_df[cat_col] = all_df[cat_col].astype('category')
 
     if args.test:  # Print test accuracy
