@@ -363,7 +363,7 @@ if __name__ == "__main__":
                 unique_sets, test_split=args.test_split)
             train = swdata.flatten(train, with_metadata=True)
             test = swdata.flatten(test, with_metadata=True)
-            random.shuffle(train, )
+            random.shuffle(train)
             random.shuffle(test)
         else:
             train = list(map(TrainEx, zip(train, metadata['configs'])))
