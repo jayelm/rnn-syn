@@ -23,6 +23,7 @@ from itertools import cycle
 import time
 import multiprocessing as mp
 import subprocess
+from random import choice as choice1d
 
 
 random = np.random.RandomState()
@@ -403,40 +404,81 @@ class SpatialExtraSimple(CaptionAgreementDataset):
     """
 
     def __init__(self,
+                 target=None,
+                 distractor=None,
                  combinations=None,
                  relation=None,
-                 relation_dir=None,
-                 target_i=None):
+                 relation_dir=None):
         # Randomly sample combinations and relations if not provided
-        if combinations is None:
-            combinations = (None, None)
-            while combinations[0] == combinations[1]:
-                combinations = tuple(random_objects(2))
+        if (target is not None and
+                distractor is not None and combinations):
+            raise ValueError(
+                "Can't specify both target/distractor and possible "
+                "combinations")
+
+        if isinstance(target, list):
+            target_combinations = choice1d(target)
+        elif isinstance(target, tuple):
+            target_combinations = target
+        elif target is None:
+            if isinstance(combinations, list):
+                if len(combinations) < 1:
+                    raise ValueError("Need more combinations")
+                target_combinations = choice1d(combinations)
+                assert isinstance(target_combinations, tuple)
+            elif combinations is None:
+                target_combinations, = random_objects(1)
+            else:
+                raise ValueError
+        else:
+            raise ValueError
+
+        if isinstance(distractor, list):
+            distractor_combinations = random.choice(distractor)
+        elif isinstance(distractor, tuple):
+            distractor_combinations = distractor
+        elif distractor is None:
+            distractor_combinations = (None, None)
+            while (distractor_combinations == (None, None) or
+                    distractor_combinations == target_combinations):
+                # TODO: Support multiple distractors
+                if isinstance(combinations, list):
+                    if len(combinations) < 1:
+                        raise ValueError("Need more combinations")
+                    distractor_combinations = choice1d(combinations)
+                    assert isinstance(distractor_combinations, tuple)
+                elif combinations is None:
+                    distractor_combinations, = random_objects(1)
+                else:
+                    raise ValueError
+        else:
+            raise ValueError
+
+        self.target_i = random.randint(2)
+        self.target_obj = target_combinations
+        # TODO: Make this distractor_objs, supportm multiple distractors
+        self.distractor_obj = distractor_combinations
+
+        if self.target_i == 0:
+            self.shapes = [target_combinations, distractor_combinations]
+        else:
+            self.shapes = [distractor_combinations, target_combinations]
+
+        # Relations and directories
         if relation is None:
             relation = random.choice(RELATIONS)
-
-        if len(combinations) > 2:
-            # TODO: Extend to multishape case
-            raise NotImplementedError
-
-        self.shapes = combinations
+        assert relation in ('x-rel', 'y-rel'), "Invalid relation"
         self.relation = relation
 
         if relation_dir is None:
             self.relation_dir = random.choice([1, -1])
-        if target_i is None:
-            self.target_i = random.randint(len(self.shapes))
-            self.target_obj = self.shapes[self.target_i]
-            self.distractor_obj = self.shapes[1 - self.target_i]
-
-        assert relation in ('x-rel', 'y-rel'), "Invalid relation"
 
         vocabulary = VOCABULARY
 
         world_generator = FixedWorldGenerator(
             entity_counts=[2],
-            validation_combinations=combinations,
-            test_combinations=combinations,
+            validation_combinations=tuple(self.shapes[:]),
+            test_combinations=tuple(self.shapes[:]),
             max_provoke_collision_rate=0.0,
             collision_tolerance=0.0,
             boundary_tolerance=0.0)
@@ -768,8 +810,9 @@ def gen_dataset(iargs):
         t = time.time()
         print("{} Started".format(i))
         sys.stdout.flush()
-    n, max_n, n_targets, n_distractors, save_folder, asym, asym_args = args
-    dataset = SpatialExtraSimple()
+    (n, max_n, n_targets, n_distractors,
+     save_folder, asym, asym_args, configs) = args
+    dataset = SpatialExtraSimple(combinations=configs)
     train = dataset.generate(
         max_n, n_targets=n_targets, n_distractors=n_distractors,
         asym=asym, asym_args=asym_args)
@@ -819,9 +862,12 @@ if __name__ == "__main__":
         action='store_true',
         help='Construct scenes with different (random) images on '
              'speaker/listener side')
+    parser.add_argument('--configs', type=str, default='',
+                        help='Manually specify possible configs '
+                             'as `color-shape` pairs, comma-separated')
     parser.add_argument(
         '--save_folder',
-        default='data/{n_configs}_{samples_each_config}_asym{asym}',
+        default='data/{configs}{n_configs}_{samples_each_config}_asym{asym}',
         help='Save folder (can use other args)')
     parser.add_argument(
         '--n_cpu',
@@ -855,6 +901,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.configs:
+        configs = [tuple(c.split('-')) + ('solid', )
+                   for c in args.configs.split(',')]
+        if not all(len(c) == 3 for c in configs):
+            parser.error('invalid config format')
+    else:
+        configs = None
+
+    # Make configs a slightly better format
+    args.configs = '_'.join('-'.join(c) for c in sorted(configs))
+
     # Check save folder.
     save_folder = args.save_folder.format(**vars(args))
     if os.path.exists(save_folder):
@@ -878,9 +935,10 @@ if __name__ == "__main__":
     }
 
     print("Generating data")
+
     args1 = (args.samples_each_config, args.n_targets,
              args.n_distractors, save_folder,
-             args.asym, asym_args)
+             args.asym, asym_args, configs)
     # Index the datasets by config
     dataset_args = [(i, ) + args1 for i in range(args.n_configs)]
 
