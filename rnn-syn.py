@@ -1,12 +1,18 @@
 """
 Run rnn-syn experiments.
+
+TODO: Maybe variation in number of images is a big confounding factor in
+messages...could just keep that constant!
 """
 
 import net
 import tensorflow as tf
 import numpy as np
 import swdata
-from swdata import AsymScene, Scene, SWorld, TrainEx
+from swdata import (
+    AsymScene, Scene, SWorld, TrainEx,
+    SpatialExtraSimple, parse_configs, gen_datasets
+)
 import sys
 import time
 from tensorflow.python import debug as tf_debug
@@ -183,22 +189,6 @@ def build_end2end_model(n_images,
                                            t_msg), t_pred, t_loss)
 
 
-def gen_dataset(iargs):
-    i, args = iargs
-    if i is not None:
-        t = time.time()
-        print("{} Started".format(i))
-        sys.stdout.flush()
-    max_n, n_targets, n_distractors = args
-    dataset = swdata.SpatialExtraSimple()
-    train = dataset.generate(
-        max_n, n_targets=n_targets, n_distractors=n_distractors)
-    if i is not None:
-        print("{} Finished ({}s)".format(i, round(time.time() - t, 2)))
-        sys.stdout.flush()
-    return train
-
-
 def batches(train, batch_size, max_data=None):
     """
     Yield batches from `train`. Discards smallest batch sizes, like
@@ -232,7 +222,67 @@ if __name__ == "__main__":
 
     data_opts = parser.add_argument_group('data', 'options for data gen')
     data_opts.add_argument(
-        '--data', type=str, required=True, help='Folder of dataset to load')
+        '--data', type=str,
+        help='Folder of dataset to load (cannot be used with --gen_data)')
+    data_opts.add_argument(
+        '--gen_data', action='store_true',
+        help='Generate dataset instead (cannot be used with --data)'
+    )
+
+    gen_data_args = parser.add_argument_group(
+        'gen data',
+        'options for generating data (NOTE: only supports asym now)')
+    gen_data_args.add_argument(
+        '--train_configs', type=str,
+        default='square-blue,square-red,triangle-blue',
+        help='Shapes possible in training data'
+    )
+    gen_data_args.add_argument(
+        '--n_train_configs', type=int,
+        default=15,
+        help='Number of train configs to sample from each epoch'
+    )
+    gen_data_args.add_argument(
+        '--samples_per_train_config', type=int,
+        default=100,
+        help='Number of samples to per training config (per epoch)'
+    )
+    # TODO: Support different kinds of testing
+    gen_data_args.add_argument(
+        '--test_targets', type=str,
+        default='triangle-red',
+        help='Target(s) in test data'
+    )
+    gen_data_args.add_argument(
+        '--test_distractors', type=str,
+        default='square-blue,square-red,triangle-blue',
+        help='Distractor(s) in test data'
+    )
+    gen_data_args.add_argument(
+        '--n_test_configs', type=int,
+        default=20,
+        help='Number of test configs to sample (only one time!)'
+    )
+    gen_data_args.add_argument(
+        '--samples_per_test_config', type=int,
+        default=500,
+        help='Number of samples per test config'
+    )
+    gen_data_args.add_argument(
+        '--gen_data_n_cpu', type=int,
+        default=1,
+        help='Number of CPUs to use for data generation'
+    )
+
+    gen_data_args.add_argument(
+        '--asym_max_images', default=5, type=int,
+        help='Maximum images in each asymmetric world')
+    gen_data_args.add_argument(
+        '--asym_min_targets', default=2, type=int,
+        help='Minimum targets in each asymmetric world')
+    gen_data_args.add_argument(
+        '--asym_min_distractors', default=1, type=int,
+        help='Minimum distractors in each asymmetric world')
 
     net_opts = parser.add_argument_group('net', 'options for net architecture')
     net_opts.add_argument(
@@ -325,6 +375,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.gen_data and args.data:
+        parser.error("Can't specify --data and --gen_data")
+    if not args.gen_data and not args.data:
+        parser.error("Must specify one of --data or --gen_data")
+
     if args.seed is not None:
         random = np.random.RandomState(args.seed)
     else:
@@ -335,16 +390,39 @@ if __name__ == "__main__":
     elif args.seed is not None:
         tf.set_random_seed(args.seed)
 
-    print("Loading data")
-    train, metadata = swdata.load_scenes(args.data, gz=True)
-
-    asym = False
-    if 'asym' in metadata and metadata['asym']:
-        print("Asymmetric dataset detected")
+    if args.gen_data:
+        print("Generating data")
+        # Hardcoed asym
         asym = True
+        if asym:
+            print("Generating asymmetric dataset")
+        else:
+            raise NotImplementedError
+        # Init dataset
+        train, metadata = gen_datasets(
+            args.n_train_configs, args.samples_per_train_config,
+            # Hardcoded targets and distractors
+            2, 1, target=None, distractor=None,
+            configs=parse_configs(args.train_configs),
+            save_folder=None,
+            # Hardcoded asym
+            asym=True, asym_args={
+                'max_images': 8,
+                'min_targets': 2,
+                'min_distractors': 1
+            },
+            pickle=False, n_cpu=args.gen_data_n_cpu)
+    else:
+        print("Loading data")
+        train, metadata = swdata.load_scenes(args.data, gz=True)
+
+        asym = False
+        if 'asym' in metadata and metadata['asym']:
+            print("Asymmetric dataset detected")
+            asym = True
 
     # Do a split
-    if args.test:
+    if args.test and not args.gen_data:
         # Keep unique configs only
         if not args.test_no_unique:
             # TODO: Support different kinds of testing (e.g. left/right)
@@ -375,7 +453,8 @@ if __name__ == "__main__":
             random.shuffle(test)
         print("Train:", len(train), "Test:", len(test))
     else:
-        # Just train on everything
+        # Just train on everything.
+        # In the gen_data case, we generate test data at test time.
         train = list(map(TrainEx, zip(train, metadata['configs'])))
         train = swdata.flatten(train, with_metadata=True)
         random.shuffle(train)
@@ -450,6 +529,10 @@ if __name__ == "__main__":
 
         print("Training")
         for epoch in range(args.epochs):
+            if args.gen_data:
+                # TODO: Generate a new dataset and metadata (don't forget to
+                # flatten and combine metadatas and batches)
+                raise NotImplementedError
             loss = 0
             hits = 0
             total = 0
@@ -478,7 +561,7 @@ if __name__ == "__main__":
                     raise RuntimeError
                 if asym:
                     l, preds, _ = session.run([t_loss, t_pred, o_train], {
-                        tfs: se,
+                f        tfs: se,
                         tls: sl,
                         tfl: envs,
                         tll: labels
@@ -505,7 +588,18 @@ if __name__ == "__main__":
             saver.save(session, args.save_path.format(**vars(args)))
 
     # ==== TEST ====
-    test_or_train = test if args.test else train
+    if args.gen_data:
+        if args.test:
+            # TODO: Generate a new train, flatten and combine metadatas
+            # According to args.test_targets, test_distractors
+            raise NotImplementedError
+        else:
+            # TODO: Do the same but with
+            # Might want to encapsulate shuffle and flatten into one func
+            raise NotImplementedError
+        #  test_or_train = test if args.test else train
+    else:
+        test_or_train = test if args.test else train
 
     # Eval test in batches too
     all_records = []

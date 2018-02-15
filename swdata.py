@@ -77,6 +77,15 @@ VOCABULARY = sorted([
 TrainEx = namedtuple('TrainEx', ['world', 'metadata'])
 
 
+# Parse an argparse --configs string
+def parse_configs(configs_str):
+    configs = [tuple(c.split('-')) + ('solid', )
+               for c in configs_str.split(',')]
+    if not all(len(c) == 3 for c in configs):
+        raise ValueError("Invalid config format")
+    return configs
+
+
 def pickle_scenes(scenes, save_file='data/dataset.pkl', gz=True):
     if save_file == 'data/dataset.pkl' and gz:
         save_file += '.gz'
@@ -811,7 +820,8 @@ def gen_dataset(iargs):
         print("{} Started".format(i))
         sys.stdout.flush()
     (n, max_n, n_targets, n_distractors,
-     save_folder, asym, asym_args, configs) = args
+     save_folder, asym, asym_args, target, distractor,
+     configs, pickle) = args
     dataset = SpatialExtraSimple(combinations=configs)
     train = dataset.generate(
         max_n, n_targets=n_targets, n_distractors=n_distractors,
@@ -819,12 +829,7 @@ def gen_dataset(iargs):
     if i is not None:
         print("{} Finished ({}s)".format(i, round(time.time() - t, 2)))
         sys.stdout.flush()
-    # Save data
-    save_file = '{}.pkl.gz'.format(n)
-    pickle_scenes(
-        train, save_file=os.path.join(save_folder, save_file), gz=True)
-    # Return config metadata
-    return {
+    metadata = {
         'config': n,
         'n': len(train),
         'relation': dataset.relation,
@@ -832,6 +837,77 @@ def gen_dataset(iargs):
         'target': dataset.target_obj,
         'distractor': dataset.distractor_obj
     }
+    # Save data
+    if pickle:
+        save_file = '{}.pkl.gz'.format(n)
+        pickle_scenes(
+            train, save_file=os.path.join(save_folder, save_file), gz=True)
+        return metadata
+    # Otherwise, return the dataset itself with the metadata
+    return train, metadata
+
+
+def gen_datasets(n_configs, samples_each_config,
+                 n_targets, n_distractors, target=None, distractor=None,
+                 configs=None, save_folder=None,
+                 asym=False, asym_args=None, pickle=False,
+                 n_cpu=1):
+    if pickle and save_folder is None:
+        raise ValueError("Must specify save_folder if pickling")
+
+    args1 = (samples_each_config, n_targets,
+             n_distractors, save_folder,
+             asym, asym_args, target, distractor, configs,
+             pickle)
+    # Index the datasets by config
+    dataset_args = [(i, ) + args1 for i in range(n_configs)]
+
+    if n_cpu == 1:  # Non-mp, track progress with tqdm
+        dataset_metas = []
+        if not pickle:
+            trains = []
+        for dargs in tqdm(list(zip(cycle([None]), dataset_args))):
+            if pickle:
+                dataset_meta = gen_dataset(dargs)
+                dataset_metas.append(dataset_meta)
+            else:
+                train, dataset_meta = gen_dataset(dargs)
+                dataset_metas.append(dataset_meta)
+                trains.append(train)
+    else:
+        t = time.time()
+        print("Multiprocessing")
+        pool = mp.Pool(n_cpu)
+        if pickle:
+            dataset_metas = pool.map(gen_dataset, list(enumerate(dataset_args)))
+        else:
+            trains, dataset_metas = zip(
+                *pool.map(gen_dataset, list(enumerate(dataset_args))))
+        pool.close()
+        pool.join()
+        print("Elapsed time: {}s".format(round(time.time() - t, 2)))
+
+    metadata = {
+        'n': sum(d['n'] for d in dataset_metas),
+        'n_configs': n_configs,
+        'samples_each_config': samples_each_config,
+        'n_targets': None if asym else n_targets,
+        'n_distractors': None if asym else n_distractors,
+        'asym': True,
+        'asym_args': None if not asym else asym_args,
+        'configs': dataset_metas
+    }
+
+    if pickle:
+        # Save dataset metadata and return nothing
+        print("Writing metadata")
+        with open(os.path.join(save_folder, 'metadata.json'), 'w') as fout:
+            json.dump(metadata, fout, sort_keys=True,
+                      indent=2, separators=(',', ': '))
+        print("Done")
+    else:
+        # Return training data and dataset metas
+        return trains, metadata
 
 
 if __name__ == "__main__":
@@ -902,10 +978,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.configs:
-        configs = [tuple(c.split('-')) + ('solid', )
-                   for c in args.configs.split(',')]
-        if not all(len(c) == 3 for c in configs):
-            parser.error('invalid config format')
+        configs = parse_configs(args.configs)
     else:
         configs = None
 
@@ -935,42 +1008,11 @@ if __name__ == "__main__":
     }
 
     print("Generating data")
-
-    args1 = (args.samples_each_config, args.n_targets,
-             args.n_distractors, save_folder,
-             args.asym, asym_args, configs)
-    # Index the datasets by config
-    dataset_args = [(i, ) + args1 for i in range(args.n_configs)]
-
-    if args.n_cpu == 1:  # Non-mp, track progress with tqdm
-        dataset_metas = []
-        for dargs in tqdm(list(zip(cycle([None]), dataset_args))):
-            dataset_meta = gen_dataset(dargs)
-            dataset_metas.append(dataset_meta)
-    else:
-        t = time.time()
-        print("Multiprocessing")
-        pool = mp.Pool(args.n_cpu)
-        dataset_metas = pool.map(gen_dataset, list(enumerate(dataset_args)))
-        pool.close()
-        pool.join()
-        print("Elapsed time: {}s".format(round(time.time() - t, 2)))
-
-    print("Writing metadata")
-    metadata = {
-        'n': sum(d['n'] for d in dataset_metas),
-        'n_configs': args.n_configs,
-        'samples_each_config': args.samples_each_config,
-        'n_targets': None if args.asym else args.n_targets,
-        'n_distractors': None if args.asym else args.n_distractors,
-        'asym': True,
-        'asym_args': None if not args.asym else asym_args,
-        'configs': dataset_metas
-    }
-    with open(os.path.join(save_folder, 'metadata.json'), 'w') as fout:
-        json.dump(metadata, fout, sort_keys=True,
-                  indent=2, separators=(',', ': '))
-    print("Done")
+    gen_datasets(
+        args.n_configs, args.samples_each_config,
+        args.n_targets, args.n_distractors, configs=configs,
+        save_folder=save_folder,
+        asym=args.asym, asym_args=asym_args, pickle=True)
 
     if args.verify_load:
         try:
