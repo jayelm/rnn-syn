@@ -1,4 +1,4 @@
-# Learning compositional communication protocols in end-to-end reference games
+# Coaxing compositionality from continuous messages in raw pixel reference games
 
 Requires Python 3.4+, and [ShapeWorld](https://github.com/AlexKuhnle/ShapeWorld), among other things.
 
