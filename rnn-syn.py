@@ -559,7 +559,8 @@ if __name__ == "__main__":
             if args.gen_data and not epoch == 0:
                 # Generate new training data
                 print("Generating new training data")
-                train, meatdata = gen_datasets_train_wrapper()
+                # TODO: Might want to do this async
+                train, metadata = gen_datasets_train_wrapper()
             else:
                 # Shuffle training data, since epoch is complete
                 random.shuffle(train)
