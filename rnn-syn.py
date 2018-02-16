@@ -243,7 +243,9 @@ if __name__ == "__main__":
     gen_data_args.add_argument(
         '--samples_per_train_config',
         type=int,
-        default=5000,
+        # 100 takes 8s
+        # 5000 takes 7m
+        default=10000,
         help='Number of samples to per training config (per epoch)')
     # TODO: Support different kinds of testing
     gen_data_args.add_argument(
@@ -259,12 +261,12 @@ if __name__ == "__main__":
     gen_data_args.add_argument(
         '--n_test_configs',
         type=int,
-        default=20,
+        default=12,
         help='Number of test configs to sample (only one time!)')
     gen_data_args.add_argument(
         '--samples_per_test_config',
         type=int,
-        default=500,
+        default=2500,
         help='Number of samples per test config')
     gen_data_args.add_argument(
         '--gen_data_n_cpu',
@@ -368,8 +370,8 @@ if __name__ == "__main__":
         help='Don\'t save comptued messages after testing')
     save_opts.add_argument(
         '--msgs_file',
-        default='{data}-{model}-{rnn_cell}-{comm_type}{n_comm}-'
-        '{epochs}epochs-msgs.pkl',
+        default='data/{data}-gendata{gen_data}-{model}-{comm_type}'
+                '{n_comm}-{epochs}epochs-msgs.pkl',
         help='Save location (can use parser options)')
     save_opts.add_argument(
         '--save_max',
@@ -641,6 +643,7 @@ if __name__ == "__main__":
             test_or_train = list(zip(test_or_train, metadata['configs']))
             test_or_train = swdata.flatten(test_or_train, with_metadata=True)
             random.shuffle(test_or_train)
+            print("Generated {} test examples".format(len(test_or_train)))
         else:
             # Just keep the last training set epoch
             print("warning: --gen_data but not --test, evaluating on last "
