@@ -481,6 +481,8 @@ class SpatialExtraSimple(CaptionAgreementDataset):
 
         if relation_dir is None:
             self.relation_dir = random.choice([1, -1])
+        else:
+            self.relation_dir = relation_dir
 
         vocabulary = VOCABULARY
 
