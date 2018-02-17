@@ -53,12 +53,13 @@ if __name__ == '__main__':
         description='Generate specific images',
         formatter_class=ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--configs', type=str,
-                        default='square-blue,square-red,triangle-blue',
-                        help='Manually specify possible configs '
-                             'as `color-shape` pairs, comma-separated')
+    parser.add_argument(
+        '--configs', type=str,
+        default='square-blue,square-red,triangle-blue,triangle-red',
+        help='Manually specify possible configs '
+             'as `color-shape` pairs, comma-separated')
     parser.add_argument('--n_per_config', type=int,
-                        default=100,
+                        default=1000,
                         help='Approx number of targets/distractors per '
                              'config')
     parser.add_argument('--n_cpu', type=int,
