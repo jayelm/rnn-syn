@@ -9,11 +9,14 @@ import net
 import tensorflow as tf
 import numpy as np
 import swdata
-from swdata import (AsymScene, Scene, SWorld, TrainEx, parse_configs,
-                    gen_datasets)
+from swdata import (
+    AsymScene, Scene, SWorld, TrainEx, load_components,
+    make_from_components
+)
 import sys
 from tensorflow.python import debug as tf_debug
 import pandas as pd
+import itertools
 
 RNN_CELLS = {
     'gru': tf.contrib.rnn.GRUCell,
@@ -221,70 +224,49 @@ if __name__ == "__main__":
     data_opts.add_argument(
         '--data',
         type=str,
-        help='Folder of dataset to load (cannot be used with --gen_data)')
+        help='Folder of dataset to load (cannot be used with --components)')
     data_opts.add_argument(
-        '--gen_data',
+        '--components',
         action='store_true',
-        help='Generate dataset instead (cannot be used with --data)')
+        help='Generate dataset from components instead (cannot be used with '
+             '--data')
 
-    gen_data_args = parser.add_argument_group(
-        'gen data',
-        'options for generating data (NOTE: only supports asym now)')
-    gen_data_args.add_argument(
-        '--train_configs',
-        type=str,
-        default='square-blue,square-red,triangle-blue',
-        help='Shapes possible in training data')
-    gen_data_args.add_argument(
-        '--n_train_configs',
-        type=int,
-        default=12,
-        help='Number of train configs to sample from each epoch')
-    gen_data_args.add_argument(
-        '--samples_per_train_config',
-        type=int,
-        # 100 takes 8s
-        # 5000 takes 7m
-        default=10000,
-        help='Number of samples to per training config (per epoch)')
-    # TODO: Support different kinds of testing
-    gen_data_args.add_argument(
-        '--test_targets',
-        type=str,
-        default='triangle-red',
+    component_args = parser.add_argument_group(
+        'components',
+        'options for generating data from cmponents (only supports asym now)')
+    component_args.add_argument(
+        '--train_components',
+        nargs='+',
+        default=['10000-square-blue-square-red',
+                 '10000-square-blue-triangle-blue',
+                 '10000-square-red-triangle-blue'])
+    component_args.add_argument(
+        '--test_components',
+        nargs='+',
+        default=['10000-square-blue-triangle-red',
+                 '10000-square-red-triangle-red',
+                 '10000-triangle-blue-triangle-red'],
         help='Target(s) in test data')
-    gen_data_args.add_argument(
-        '--test_distractors',
-        type=str,
-        default='square-blue,square-red,triangle-blue',
-        help='Distractor(s) in test data')
-    gen_data_args.add_argument(
-        '--n_test_configs',
-        type=int,
-        default=12,
-        help='Number of test configs to sample (only one time!)')
-    gen_data_args.add_argument(
-        '--samples_per_test_config',
-        type=int,
-        default=2500,
-        help='Number of samples per test config')
-    gen_data_args.add_argument(
-        '--gen_data_n_cpu',
-        type=int,
-        default=1,
-        help='Number of CPUs to use for data generation')
+    component_args.add_argument(
+        '--n_dev', type=int, default=512,
+        help='Dev set size'
+    )
+    component_args.add_argument(
+        '--n_test', type=int, default=1024,
+        help='Number of testing examples to create from components'
+    )
 
-    gen_data_args.add_argument(
+    component_args.add_argument(
         '--asym_max_images',
         default=5,
         type=int,
         help='Maximum images in each asymmetric world')
-    gen_data_args.add_argument(
+    component_args.add_argument(
         '--asym_min_targets',
         default=2,
         type=int,
         help='Minimum targets in each asymmetric world')
-    gen_data_args.add_argument(
+    component_args.add_argument(
         '--asym_min_distractors',
         default=1,
         type=int,
@@ -370,7 +352,7 @@ if __name__ == "__main__":
         help='Don\'t save comptued messages after testing')
     save_opts.add_argument(
         '--msgs_file',
-        default='data/{data}-gendata{gen_data}-{model}-{comm_type}'
+        default='data/{data}-{model}-{comm_type}'
                 '{n_comm}-{epochs}epochs-msgs.pkl',
         help='Save location (can use parser options)')
     save_opts.add_argument(
@@ -381,10 +363,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.gen_data and args.data:
-        parser.error("Can't specify --data and --gen_data")
-    if not args.gen_data and not args.data:
-        parser.error("Must specify one of --data or --gen_data")
+    if args.components and args.data:
+        parser.error("Can't specify --data and --components")
+    if not args.components and not args.data:
+        parser.error("Must specify one of --data or --components")
 
     if args.seed is not None:
         random = np.random.RandomState(args.seed)
@@ -397,46 +379,34 @@ if __name__ == "__main__":
         tf.set_random_seed(args.seed)
 
 
-    if args.gen_data:
-        # Hardcoed asym
+    if args.components:
+        if any(x in args.train_components for x in args.test_components):
+            print("Warning: test components in train components, could be"
+                  "repeats depending on size of data")
+        # Hardcoded asym
         asym = True
         if asym:
-            print("Generating asymmetric dataset")
+            print("Generating from components (asym)")
         else:
-            print("Generating dataset")
             raise NotImplementedError
-
-        def gen_datasets_train_wrapper():
-            """
-            Wrapper for generating a train dataset with swdata.py, folding in
-            the metadata, and returning both.
-            """
-            # Init dataset
-            train, metadata = gen_datasets(
-                args.n_train_configs,
-                args.samples_per_train_config,
-                # Hardcoded targets and distractors
-                2,
-                1,
-                target=None,
-                distractor=None,
-                configs=parse_configs(args.train_configs),
-                save_folder=None,
-                # Hardcoded asym
-                asym=True,
-                asym_args={
-                    'max_images': 8,
-                    'min_targets': 2,
-                    'min_distractors': 1
-                },
-                pickle=False,
-                n_cpu=args.gen_data_n_cpu)
-            train = list(zip(train, metadata['configs']))
-            train = swdata.flatten(train, with_metadata=True)
-            random.shuffle(train)
-            print("Generated {} training examples".format(len(train)))
-            return train, metadata
-        train, metadata = gen_datasets_train_wrapper()
+        print("Loading training components")
+        configs, components_dict = load_components(args.train_components)
+        # Generate metadata ourself
+        asym_args = {
+            'max_images': args.asym_max_images,
+            'min_targets': args.asym_min_targets,
+            'min_distractors': args.asym_min_distractors
+        }
+        train = make_from_components(args.batch_size, configs,
+                                     components_dict, asym_args)
+        # To satisfy later args
+        metadata = {
+            'asym': True,
+            'asym_args': asym_args,
+        }
+        # Generate a dev set
+        dev, dev_metadata = zip(*make_from_components(
+            args.n_dev, configs, components_dict, asym_args))
     else:
         print("Loading data")
         train, metadata = swdata.load_scenes(args.data, gz=True)
@@ -446,42 +416,39 @@ if __name__ == "__main__":
             print("Asymmetric dataset detected")
             asym = True
 
-    # Do a split
-    if args.test and not args.gen_data:
-        # Keep unique configs only
-        if not args.test_no_unique:
-            # TODO: Support different kinds of testing (e.g. left/right)
-            unique_sets = []
-            seen_configs = set()
-            for config_data, config_md in zip(train, metadata['configs']):
-                config_hashable = (tuple(config_md['distractor']),
-                                   tuple(config_md['target']),
-                                   config_md['relation'],
-                                   config_md['relation_dir'])
-                if config_hashable not in seen_configs:
-                    seen_configs.add(config_hashable)
-                    unique_sets.append((config_data, config_md))
-            random.shuffle(unique_sets)
-            train, test = swdata.train_test_split(
-                unique_sets, test_split=args.test_split)
-            train = swdata.flatten(train, with_metadata=True)
-            test = swdata.flatten(test, with_metadata=True)
-            random.shuffle(train)
-            random.shuffle(test)
+        # Train/test split
+        if args.test:
+            # Keep unique configs only
+            if not args.test_no_unique:
+                # TODO: Support different kinds of testing (e.g. left/right)
+                unique_sets = []
+                seen_configs = set()
+                for config_data, config_md in zip(train, metadata['configs']):
+                    config_hashable = (tuple(config_md['distractor']),
+                                       tuple(config_md['target']),
+                                       config_md['relation'],
+                                       config_md['relation_dir'])
+                    if config_hashable not in seen_configs:
+                        seen_configs.add(config_hashable)
+                        unique_sets.append((config_data, config_md))
+                random.shuffle(unique_sets)
+                train, test = swdata.train_test_split(
+                    unique_sets, test_split=args.test_split)
+                train = swdata.flatten(train, with_metadata=True)
+                test = swdata.flatten(test, with_metadata=True)
+                random.shuffle(train)
+                random.shuffle(test)
+            else:
+                train = list(zip(train, metadata['configs']))
+                train, test = swdata.train_test_split(
+                    train, test_split=args.test_split)
+                train = swdata.flatten(train, with_metadata=True)
+                test = swdata.flatten(test, with_metadata=True)
+                random.shuffle(train)
+                random.shuffle(test)
+            print("Train:", len(train), "Test:", len(test))
         else:
-            train = list(zip(train, metadata['configs']))
-            train, test = swdata.train_test_split(
-                train, test_split=args.test_split)
-            train = swdata.flatten(train, with_metadata=True)
-            test = swdata.flatten(test, with_metadata=True)
-            random.shuffle(train)
-            random.shuffle(test)
-        print("Train:", len(train), "Test:", len(test))
-    else:
-        if not args.gen_data:
-            # If gen_data, then data has already been shuffled and flattened.
             # Just train on everything.
-            # In the gen_data case, we generate test data at test time.
             train = list(zip(train, metadata['configs']))
             train = swdata.flatten(train, with_metadata=True)
             random.shuffle(train)
@@ -556,19 +523,23 @@ if __name__ == "__main__":
 
         print("Training")
         for epoch in range(args.epochs):
-            if args.gen_data and not epoch == 0:
-                # Generate new training data
-                print("Generating new training data")
-                # TODO: Might want to do this async
-                train, metadata = gen_datasets_train_wrapper()
+            if args.components:
+                if epoch != 0:
+                    # Sample new components
+                    train = make_from_components(args.batch_size, configs,
+                                                 components_dict, asym_args)
             else:
                 # Shuffle training data, since epoch is complete
                 random.shuffle(train)
             loss = 0
             hits = 0
             total = 0
-            for batch in batches(
-                    train, args.batch_size, max_data=args.max_data):
+            if args.components:
+                batch_iter = [train]
+            else:
+                batch_iter = batches(train, args.batch_size,
+                                     max_data=args.max_data)
+            for batch in batch_iter:
                 batch, batch_metadata = zip(*batch)
                 if args.model == 'feature':
                     if asym:
@@ -606,54 +577,71 @@ if __name__ == "__main__":
                 hits += np.all(match, axis=1).sum()
                 total += len(match)
 
-            acc = hits / total
-            print("Epoch {}: Accuracy {}, Loss {}".format(epoch, acc, loss))
+            if args.components and (epoch % 10 == 0):
+                # Every 10 epochs, print dev accuracy
+                if args.model == 'feature':
+                    if asym:
+                        # Since we need to measure accuracy stats on listener
+                        # labels, keep name for those
+                        se, sl, envs, labels = swdata.extract_envs_and_labels(
+                            dev, max_images, max_shapes, n_attrs, asym=True)
+                    else:
+                        envs, labels = swdata.extract_envs_and_labels(
+                            dev, max_images, max_shapes, n_attrs, asym=False)
+                elif args.model == 'end2end':
+                    if asym:
+                        se, sl, envs, labels = swdata.prepare_end2end(
+                            dev, max_images, asym=True)
+                    else:
+                        envs, labels = swdata.prepare_end2end(
+                            dev, max_images, asym=False)
+                else:
+                    raise RuntimeError
+                if asym:
+                    l, preds = session.run([t_loss, t_pred], {
+                        tfs: se,
+                        tls: sl,
+                        tfl: envs,
+                        tll: labels
+                    })
+                else:
+                    l, preds = session.run([t_loss, t_pred], {
+                        t_features: envs,
+                        t_labels: labels
+                    })
 
-            loss_history.append(loss)
-            acc_history.append(acc)
+                match = (preds > 0) == labels
+                dev_hits = np.all(match, axis=1).sum()
+                dev_acc = dev_hits / args.n_dev
+                print("Epoch {}: Dev accuracy {}, Loss {}".format(
+                    epoch, dev_acc, l
+                ))
+            elif not args.components:
+                acc = hits / total
+                print("Epoch {}: Accuracy {}, Loss {}".format(epoch, acc, loss))
+
+                loss_history.append(loss)
+                acc_history.append(acc)
 
         if args.save:
             saver = tf.train.Saver()
             saver.save(session, args.save_path.format(**vars(args)))
 
     # ==== TEST ====
-    if args.gen_data:
-        if args.test:
-            print("Generating testing set")
-            # Generate a new test dataset according to the test configs
-            # (targets, distractors)
-            test_or_train, metadata = gen_datasets(
-                args.n_test_configs,
-                args.samples_per_test_config,
-                # Hardcoded targets and distractors
-                2,
-                1,
-                target=parse_configs(args.test_targets),
-                distractor=parse_configs(args.test_distractors),
-                configs=None,
-                save_folder=None,
-                # Hardcoded asym
-                asym=True,
-                asym_args={
-                    'max_images': 8,
-                    'min_targets': 2,
-                    'min_distractors': 1
-                },
-                pickle=False,
-                n_cpu=args.gen_data_n_cpu)
-            test_or_train = list(zip(test_or_train, metadata['configs']))
-            test_or_train = swdata.flatten(test_or_train, with_metadata=True)
-            random.shuffle(test_or_train)
-            print("Generated {} test examples".format(len(test_or_train)))
+    if args.components:
+        if not args.test:
+            print("Warning: --components but not --test, using dev")
+            test_or_train = zip(dev, dev_metadata)
         else:
-            # Just keep the last training set epoch
-            print("warning: --gen_data but not --test, evaluating on last "
-                  "training set epoch")
-            test_or_train = train
+            print("Loading testing components")
+            configs, components_dict = load_components(args.test_components)
+            test_or_train = make_from_components(args.n_test, configs,
+                                                 components_dict, asym_args)
     else:
         test_or_train = test if args.test else train
 
     # Eval test in batches too
+    print("Eval test")
     all_records = []
 
     for batch in batches(test_or_train, args.batch_size):

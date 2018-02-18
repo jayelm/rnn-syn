@@ -24,6 +24,7 @@ import time
 import multiprocessing as mp
 import subprocess
 from random import choice as choice1d
+from collections import defaultdict
 
 
 random = np.random.RandomState()
@@ -31,6 +32,23 @@ random = np.random.RandomState()
 
 def invert(d):
     return {v: k for k, v in d.items()}
+
+
+def sample_asym(max_images, min_targets, min_distractors):
+    """
+    Sample a random number of targets between min_targets and
+    max_images - min_distractors
+    """
+    n_targets = random.randint(
+        min_targets, max_images - min_distractors + 1)
+    n_left = max_images - n_targets
+    assert n_left >= min_distractors
+    # Sample a number of distractors between min_distractors and
+    # the number of possible images left
+    n_distractors = random.randint(
+        min_distractors, n_left + 1)
+    assert (n_targets + n_distractors) <= max_images
+    return n_targets, n_distractors
 
 
 COLORS = [
@@ -593,20 +611,6 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                 targets, distractors,
                 n_targets=n_targets, n_distractors=n_distractors)
 
-    def sample_asym(self, max_images, min_targets, min_distractors):
-        # Sample a random number of targets between min_targets and
-        # max_images - min_distractors
-        n_targets = random.randint(
-            min_targets, max_images - min_distractors + 1)
-        n_left = max_images - n_targets
-        assert n_left >= min_distractors
-        # Sample a number of distractors between min_distractors and
-        # the number of possible images left
-        n_distractors = random.randint(
-            min_distractors, n_left + 1)
-        assert (n_targets + n_distractors) <= max_images
-        return n_targets, n_distractors
-
     def combine_targets_distractors_asym(self, targets, distractors,
                                          max_images=5,
                                          min_targets=2,
@@ -619,9 +623,9 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         asym_scenes = []
         try:
             while True:
-                n_targets_speaker, n_distractors_speaker = self.sample_asym(
+                n_targets_speaker, n_distractors_speaker = sample_asym(
                     max_images, min_targets, min_distractors)
-                n_targets_listener, n_distractors_listener = self.sample_asym(
+                n_targets_listener, n_distractors_listener = sample_asym(
                     max_images, min_targets, min_distractors)
                 speaker_targets = [(targets.pop(), 1)
                                    for _ in range(n_targets_speaker)]
@@ -815,6 +819,84 @@ class SpatialExtraSimple(CaptionAgreementDataset):
             fout.write('\n')
 
 
+def load_components(component_strs, component_path='./data/components/'):
+    components_dict = defaultdict(dict)
+    configs = []
+    for cstr in tqdm(component_strs, desc='Load components'):
+        if cstr.endswith('-x') or cstr.endswith('-y'):
+            raise NotImplementedError("Can't test specific relations")
+        cstr_path = os.path.join(component_path, cstr)
+
+        # Extract target and distractor by shaving off the number
+        cstr_td_pieces = cstr.split('-')[1:]
+        target = tuple(cstr_td_pieces[:2])
+        distractor = tuple(cstr_td_pieces[2:])
+
+        for rel in ['x', 'y']:
+            config_hash = (target, distractor, '{}-rel'.format(rel))
+            assert config_hash not in configs
+            configs.append(config_hash)
+            for td in ['targets', 'distractors']:
+                # Load either targets or distractors
+                cstr_td = '{}-{}-{}.pkl.gz'.format(cstr_path, rel, td[0])
+                with gzip.open(cstr_td, 'r') as f_components:
+                    components_dict[config_hash][td] = pickle.load(
+                        f_components)
+    return configs, dict(components_dict)
+
+
+def make_from_components(n, configs, components_dict, asym_args):
+    """
+    Sample `n` training examples
+    """
+    max_images = asym_args['max_images']
+    min_targets = asym_args['min_targets']
+    min_distractors = asym_args['min_distractors']
+    scenes = []
+    for i in range(n):
+        config = choice1d(configs)
+        target, distractor, rel = config
+        cc_targets = components_dict[config]['targets']
+        cc_distractors = components_dict[config]['distractors']
+        n_targets_speaker, n_distractors_speaker = sample_asym(
+            max_images, min_targets, min_distractors)
+        n_targets_listener, n_distractors_listener = sample_asym(
+            max_images, min_targets, min_distractors)
+        speaker_targets = [(choice1d(cc_targets), 1)
+                           for _ in range(n_targets_speaker)]
+        speaker_distractors = [(choice1d(cc_distractors), 0)
+                               for _ in range(n_distractors_speaker)]
+        listener_targets = [(choice1d(cc_targets), 1)
+                            for _ in range(n_targets_listener)]
+        listener_distractors = [(choice1d(cc_distractors), 0)
+                                for _ in range(n_distractors_listener)]
+        speaker_combs = speaker_targets + speaker_distractors
+        listener_combs = listener_targets + listener_distractors
+        random.shuffle(speaker_combs)
+        random.shuffle(listener_combs)
+        speaker_sworlds, speaker_labels = zip(*speaker_combs)
+        listener_sworlds, listener_labels = zip(*listener_combs)
+        speaker_sworlds = list(map(to_sworld, speaker_sworlds))
+        listener_sworlds = list(map(to_sworld, listener_sworlds))
+        scene = AsymScene(speaker_worlds=speaker_sworlds,
+                          speaker_labels=np.array(speaker_labels),
+                          listener_worlds=listener_sworlds,
+                          listener_labels=np.array(listener_labels),
+                          relation=rel,
+                          relation_dir=1)  # Always hardcoded to 1
+        scene = flatten_asym_scene(scene)
+        metadata = {
+            'config': n,
+            'n': 1,
+            'relation': config[-1],
+            'relation_dir': 1,
+            'target': list(target) + ['solid'],
+            'distractor': list(distractor) + ['solid'],
+        }
+        scenes.append(TrainEx(scene, metadata))
+    return scenes
+
+
 def gen_dataset(iargs):
     i, args = iargs
     if i is not None:
@@ -981,11 +1063,10 @@ if __name__ == "__main__":
 
     if args.configs:
         configs = parse_configs(args.configs)
+        # Make configs a slightly better format
+        args.configs = '_'.join('-'.join(c) for c in sorted(configs))
     else:
         configs = None
-
-    # Make configs a slightly better format
-    args.configs = '_'.join('-'.join(c) for c in sorted(configs))
 
     # Check save folder.
     save_folder = args.save_folder.format(**vars(args))
