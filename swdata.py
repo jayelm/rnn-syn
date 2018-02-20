@@ -845,7 +845,9 @@ def load_components(component_strs, component_path='./data/components/'):
     return configs, dict(components_dict)
 
 
-def make_from_components(n, configs, components_dict, asym_args):
+def make_from_components(n, configs, components_dict, asym=True,
+                         asym_args=None,
+                         relation_dir=None):
     """
     Sample `n` training examples
     """
@@ -856,15 +858,22 @@ def make_from_components(n, configs, components_dict, asym_args):
     for i in range(n):
         config = choice1d(configs)
         target, distractor, rel = config
-        relation_dir = 1 if random.randint(2) else -1
+        if relation_dir is None:
+            # Sample a new rd
+            rd = 1 if random.randint(2) else -1
+        elif isinstance(relation_dir, int):
+            assert relation_dir == 1 or relation_dir == -1
+            rd = relation_dir
+        else:
+            raise ValueError("Unknown relation dir {}".format(relation_dir))
         cc_targets = components_dict[config]['targets']
         cc_distractors = components_dict[config]['distractors']
         n_targets_speaker, n_distractors_speaker = sample_asym(
             max_images, min_targets, min_distractors)
         n_targets_listener, n_distractors_listener = sample_asym(
             max_images, min_targets, min_distractors)
-        targets_yes = 1 if relation_dir == 1 else 0
-        distractors_yes = 0 if relation_dir == 1 else 1
+        targets_yes = 1 if rd == 1 else 0
+        distractors_yes = 0 if rd == 1 else 1
         speaker_targets = [(choice1d(cc_targets), targets_yes)
                            for _ in range(n_targets_speaker)]
         speaker_distractors = [(choice1d(cc_distractors), distractors_yes)
@@ -886,13 +895,13 @@ def make_from_components(n, configs, components_dict, asym_args):
                           listener_worlds=listener_sworlds,
                           listener_labels=np.array(listener_labels),
                           relation=rel,
-                          relation_dir=relation_dir)
+                          relation_dir=rd)
         scene = flatten_asym_scene(scene)
         metadata = {
             'config': i,
             'n': 1,
             'relation': config[-1],
-            'relation_dir': relation_dir,
+            'relation_dir': rd,
             'target': list(target) + ['solid'],
             'distractor': list(distractor) + ['solid'],
         }
