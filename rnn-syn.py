@@ -17,6 +17,7 @@ import sys
 from tensorflow.python import debug as tf_debug
 import pandas as pd
 import itertools
+import gc
 
 RNN_CELLS = {
     'gru': tf.contrib.rnn.GRUCell,
@@ -272,11 +273,11 @@ if __name__ == "__main__":
     component_args.add_argument(
         '--train_components',
         nargs='+',
-        default=CONFIGS['shape_color_generalization_1']['train'])
+        default=CONFIGS['shape_color_generalization_2']['train'])
     component_args.add_argument(
         '--test_components',
         nargs='+',
-        default=CONFIGS['shape_color_generalization_1']['test'])
+        default=CONFIGS['shape_color_generalization_2']['test'])
     component_args.add_argument(
         '--n_dev', type=int, default=512,
         help='Dev set size'
@@ -664,6 +665,12 @@ if __name__ == "__main__":
             test_or_train = zip(dev, dev_metadata)
         else:
             print("Loading testing components")
+            # Make sure memory is free
+            del dev
+            del dev_metadata
+            del configs
+            del components_dict
+            gc.collect()
             configs, components_dict = load_components(args.test_components)
             test_or_train = make_from_components(args.n_test, configs,
                                                  components_dict, asym_args)
