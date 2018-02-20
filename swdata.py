@@ -856,19 +856,22 @@ def make_from_components(n, configs, components_dict, asym_args):
     for i in range(n):
         config = choice1d(configs)
         target, distractor, rel = config
+        relation_dir = 1 if random.randint(2) else -1
         cc_targets = components_dict[config]['targets']
         cc_distractors = components_dict[config]['distractors']
         n_targets_speaker, n_distractors_speaker = sample_asym(
             max_images, min_targets, min_distractors)
         n_targets_listener, n_distractors_listener = sample_asym(
             max_images, min_targets, min_distractors)
-        speaker_targets = [(choice1d(cc_targets), 1)
+        targets_yes = 1 if relation_dir == 1 else 0
+        distractors_yes = 0 if relation_dir == 1 else 1
+        speaker_targets = [(choice1d(cc_targets), targets_yes)
                            for _ in range(n_targets_speaker)]
-        speaker_distractors = [(choice1d(cc_distractors), 0)
+        speaker_distractors = [(choice1d(cc_distractors), distractors_yes)
                                for _ in range(n_distractors_speaker)]
-        listener_targets = [(choice1d(cc_targets), 1)
+        listener_targets = [(choice1d(cc_targets), targets_yes)
                             for _ in range(n_targets_listener)]
-        listener_distractors = [(choice1d(cc_distractors), 0)
+        listener_distractors = [(choice1d(cc_distractors), distractors_yes)
                                 for _ in range(n_distractors_listener)]
         speaker_combs = speaker_targets + speaker_distractors
         listener_combs = listener_targets + listener_distractors
@@ -883,13 +886,13 @@ def make_from_components(n, configs, components_dict, asym_args):
                           listener_worlds=listener_sworlds,
                           listener_labels=np.array(listener_labels),
                           relation=rel,
-                          relation_dir=1)  # Always hardcoded to 1
+                          relation_dir=relation_dir)
         scene = flatten_asym_scene(scene)
         metadata = {
-            'config': n,
+            'config': i,
             'n': 1,
             'relation': config[-1],
-            'relation_dir': 1,
+            'relation_dir': relation_dir,
             'target': list(target) + ['solid'],
             'distractor': list(distractor) + ['solid'],
         }
