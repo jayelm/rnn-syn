@@ -1,0 +1,20 @@
+ZERO-SHOT GENERALIZATION TO NEW OBJECT (TRIANGLE-RED)
+1024 epochs, 20k components, 5/2/1: 0.35449 acc
+1024 epochs, 20k components, 8/2/1: 0.33789 acc
+
+1024 epochs, 20k components, 8/4/4 (keeping numbers constant): 0.202148
+with 8/4/4, convergence is a lot more reliable, loss gets even smaller...
+
+BTW: Could be that model only does well when red/triangle is the distractor, if
+messages specifically encode object relations
+
+
+
+GENERALIZATION TO NEW PAIR - square-blue-square-red, square-red-triangle-blue,
+then generalize to square-blue-triangle-blue
+
+This is boring, mainly serves to verify nature of messages
+
+1024 epochs, 20k components, 5-2-1: 0.95606
+
+GENERALIZATION TO DIRECTIONS - TODO

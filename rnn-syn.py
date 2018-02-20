@@ -29,6 +29,41 @@ assert SWorld
 assert TrainEx
 
 
+def mkconfig(a, b, n=20000):
+    # Just sorts them in order so we can reliably identify the config.
+    return '{}-{}-{}'.format(n, *sorted([a, b]))
+
+
+def mkconfigs(arr, n=20000):
+    return [mkconfig(a, b, n=n) for a, b in itertools.combinations(arr, 2)]
+
+
+CONFIGS = {
+    # Generalization to new color/shape pair (triangle + red)
+    # After seeing 2 colors and shapes
+    'shape_color_generalization_1': {
+        'train': [mkconfig('square-blue', 'square-red'),
+                  mkconfig('square-blue', 'triangle-blue'),
+                  mkconfig('square-red', 'triangle-blue')],
+        'test': [mkconfig('square-blue', 'triangle-red'),
+                 mkconfig('square-red', 'triangle-red'),
+                 mkconfig('triangle-blue', 'triangle-red')]
+    },
+    # Generalization to new color/shape pair
+    # After seeing 3 colors and 2 shapes
+    'shape_color_generalization_2': {
+        'train': mkconfigs(['square-blue', 'square-red', 'triangle-blue', 'square-green', 'triangle-green']),
+        'test': [mkconfig('triangle-red', b) for b in
+                 ['square-blue', 'square-red', 'triangle-blue', 'square-green', 'triangle-green']]
+    },
+    # Generalization to new pair (does it with 100% accuracy, meaning messages encode target/referent
+    'new_pair_generalization_1': {
+        'train': [mkconfig('square-blue', 'square-red'), mkconfig('square-red', 'triangle-blue')],
+        'test': [mkconfig('square-blue', 'triangle-blue')]
+    }
+}
+
+
 def build_feature_model(n_images,
                         max_shapes,
                         n_attrs,
@@ -237,16 +272,11 @@ if __name__ == "__main__":
     component_args.add_argument(
         '--train_components',
         nargs='+',
-        default=['10000-square-blue-square-red',
-                 '10000-square-blue-triangle-blue',
-                 '10000-square-red-triangle-blue'])
+        default=CONFIGS['shape_color_generalization_1']['train'])
     component_args.add_argument(
         '--test_components',
         nargs='+',
-        default=['10000-square-blue-triangle-red',
-                 '10000-square-red-triangle-red',
-                 '10000-triangle-blue-triangle-red'],
-        help='Target(s) in test data')
+        default=CONFIGS['shape_color_generalization_1']['test'])
     component_args.add_argument(
         '--n_dev', type=int, default=512,
         help='Dev set size'
