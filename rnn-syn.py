@@ -318,7 +318,7 @@ if __name__ == "__main__":
         nargs='+',
         default=CONFIGS['shape_color_generalization_3']['test'])
     component_args.add_argument(
-        '--n_dev', type=int, default=1024, help='Dev set size')
+        '--n_dev', type=int, default=512, help='Dev set size')
     component_args.add_argument(
         '--n_test',
         type=int,
@@ -704,6 +704,7 @@ if __name__ == "__main__":
                     })
 
                 dev_match = (dev_preds > 0) == dev_labels
+                assert len(dev_match) == args.n_dev
                 dev_hits = np.all(match, axis=1).sum()
                 dev_acc = dev_hits / args.n_dev
                 print("Epoch {}: Dev accuracy {}, Loss {}".format(
@@ -761,8 +762,6 @@ if __name__ == "__main__":
             dev_true_examples,
             'dev')
         all_records.extend(dev_records)
-
-
 
     for batch in batches(test_or_train, args.batch_size):
         batch, batch_metadata = zip(*batch)
