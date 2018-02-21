@@ -494,6 +494,7 @@ if __name__ == "__main__":
             components_dict,
             asym=asym,
             asym_args=asym_args))
+        dev_envs = None  # Flag to generate dev envs only once
     else:
         print("Loading data")
         train, metadata = swdata.load_scenes(args.data, gz=True)
@@ -670,24 +671,25 @@ if __name__ == "__main__":
 
             if args.components and (epoch % args.dev_every == 0):
                 # Every 10 epochs, print dev accuracy
-                if args.model == 'feature':
-                    if asym:
-                        # Since we need to measure accuracy stats on listener
-                        # labels, keep name for those
-                        dev_se, dev_sl, dev_envs, dev_labels = swdata.extract_envs_and_labels(
-                            dev, max_images, max_shapes, n_attrs, asym=True)
+                if dev_envs is None:
+                    if args.model == 'feature':
+                        if asym:
+                            # Since we need to measure accuracy stats on listener
+                            # labels, keep name for those
+                            dev_se, dev_sl, dev_envs, dev_labels = swdata.extract_envs_and_labels(
+                                dev, max_images, max_shapes, n_attrs, asym=True)
+                        else:
+                            dev_envs, dev_labels = swdata.extract_envs_and_labels(
+                                dev, max_images, max_shapes, n_attrs, asym=False)
+                    elif args.model == 'end2end':
+                        if asym:
+                            dev_se, dev_sl, dev_envs, dev_labels = swdata.prepare_end2end(
+                                dev, max_images, asym=True)
+                        else:
+                            dev_envs, dev_labels = swdata.prepare_end2end(
+                                dev, max_images, asym=False)
                     else:
-                        dev_envs, dev_labels = swdata.extract_envs_and_labels(
-                            dev, max_images, max_shapes, n_attrs, asym=False)
-                elif args.model == 'end2end':
-                    if asym:
-                        dev_se, dev_sl, dev_envs, dev_labels = swdata.prepare_end2end(
-                            dev, max_images, asym=True)
-                    else:
-                        dev_envs, dev_labels = swdata.prepare_end2end(
-                            dev, max_images, asym=False)
-                else:
-                    raise RuntimeError
+                        raise RuntimeError
                 if asym:
                     dev_l, dev_preds, dev_msgs = session.run(
                         [t_loss, t_pred, t_msg], {
