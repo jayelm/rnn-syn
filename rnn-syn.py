@@ -30,12 +30,12 @@ assert SWorld
 assert TrainEx
 
 
-def mkconfig(a, b, n=20000):
+def mkconfig(a, b, n=1000):
     # Just sorts them in order so we can reliably identify the config.
     return '{}-{}-{}'.format(n, *sorted([a, b]))
 
 
-def mkconfigs(arr, n=20000):
+def mkconfigs(arr, n=1000):
     return [mkconfig(a, b, n=n) for a, b in itertools.combinations(arr, 2)]
 
 
@@ -318,7 +318,7 @@ if __name__ == "__main__":
         nargs='+',
         default=CONFIGS['shape_color_generalization_3']['test'])
     component_args.add_argument(
-        '--n_dev', type=int, default=512, help='Dev set size')
+        '--n_dev', type=int, default=1024, help='Dev set size')
     component_args.add_argument(
         '--n_test',
         type=int,
@@ -406,6 +406,12 @@ if __name__ == "__main__":
         type=int,
         default=None,
         help='Max size of training data (rest discarded)')
+    train_opts.add_argument(
+        '--dev_every',
+        type=int,
+        default=10,
+        help='How often (in epochs) to report dev results. '
+             'Only applies to components (for now)')
 
     test_opts = parser.add_argument_group('train', 'options for net testing')
     test_opts.add_argument('--test', action='store_true', help='do testing')
@@ -662,44 +668,46 @@ if __name__ == "__main__":
                 hits += np.all(match, axis=1).sum()
                 total += len(match)
 
-            if args.components and (epoch % 10 == 0):
+            if args.components and (epoch % args.dev_every == 0):
                 # Every 10 epochs, print dev accuracy
                 if args.model == 'feature':
                     if asym:
                         # Since we need to measure accuracy stats on listener
                         # labels, keep name for those
-                        se, sl, envs, labels = swdata.extract_envs_and_labels(
+                        dev_se, dev_sl, dev_envs, dev_labels = swdata.extract_envs_and_labels(
                             dev, max_images, max_shapes, n_attrs, asym=True)
                     else:
-                        envs, labels = swdata.extract_envs_and_labels(
+                        dev_envs, dev_labels = swdata.extract_envs_and_labels(
                             dev, max_images, max_shapes, n_attrs, asym=False)
                 elif args.model == 'end2end':
                     if asym:
-                        se, sl, envs, labels = swdata.prepare_end2end(
+                        dev_se, dev_sl, dev_envs, dev_labels = swdata.prepare_end2end(
                             dev, max_images, asym=True)
                     else:
-                        envs, labels = swdata.prepare_end2end(
+                        dev_envs, dev_labels = swdata.prepare_end2end(
                             dev, max_images, asym=False)
                 else:
                     raise RuntimeError
                 if asym:
-                    l, preds = session.run([t_loss, t_pred], {
-                        tfs: se,
-                        tls: sl,
-                        tfl: envs,
-                        tll: labels
+                    dev_l, dev_preds, dev_msgs = session.run(
+                        [t_loss, t_pred, t_msg], {
+                        tfs: dev_se,
+                        tls: dev_sl,
+                        tfl: dev_envs,
+                        tll: dev_labels
                     })
                 else:
-                    l, preds = session.run([t_loss, t_pred], {
-                        t_features: envs,
-                        t_labels: labels
+                    dev_l, dev_preds, dev_msgs = session.run(
+                        [t_loss, t_pred, t_msg], {
+                        t_features: dev_envs,
+                        t_labels: dev_labels
                     })
 
-                match = (preds > 0) == labels
+                dev_match = (dev_preds > 0) == dev_labels
                 dev_hits = np.all(match, axis=1).sum()
                 dev_acc = dev_hits / args.n_dev
                 print("Epoch {}: Dev accuracy {}, Loss {}".format(
-                    epoch, dev_acc, l))
+                    epoch, dev_acc, dev_l))
             elif not args.components:
                 acc = hits / total
                 print("Epoch {}: Accuracy {}, Loss {}".format(
@@ -720,10 +728,7 @@ if __name__ == "__main__":
         else:
             print("Loading testing components")
             # Make sure memory is free
-            del dev
-            del dev_metadata
-            del configs
-            del components_dict
+            del configs, components_dict
             gc.collect()
             configs, components_dict = load_components(args.test_components)
             test_or_train = make_from_components(
@@ -738,6 +743,26 @@ if __name__ == "__main__":
     # Eval test in batches too
     print("Eval test")
     all_records = []
+
+    if args.components:
+        # Add dev messages
+        dev_true_examples = list(map(find_true_example, zip(dev_se, dev_sl)))
+
+        dev_records = zip(
+            dev_msgs,
+            dev_preds,
+            dev_labels,
+            (x.relation[0] for x in dev),
+            (x.relation_dir for x in dev),
+            (c['target'][0] for c in dev_metadata),
+            (c['target'][1] for c in dev_metadata),
+            (c['distractor'][0] for c in dev_metadata),
+            (c['distractor'][1] for c in dev_metadata),
+            dev_true_examples,
+            'dev')
+        all_records.extend(dev_records)
+
+
 
     for batch in batches(test_or_train, args.batch_size):
         batch, batch_metadata = zip(*batch)
@@ -785,15 +810,15 @@ if __name__ == "__main__":
             (c['distractor'][0] for c in batch_metadata),
             (c['distractor'][1] for c in batch_metadata),
             # BSE
-            bse_true_examples)
-        batch_records = list(batch_records)  # TEMP
+            bse_true_examples,
+            'test')
         all_records.extend(batch_records)
 
     all_df = pd.DataFrame.from_records(
         all_records,
         columns=('msg', 'pred', 'obs', 'relation', 'relation_dir',
                  'target_shape', 'target_color', 'distractor_shape',
-                 'distractor_color', 'example_image'))
+                 'distractor_color', 'example_image', 'phase'))
     all_df.pred = all_df.pred.apply(lambda x: x > 0)
     all_df.obs = all_df.obs.apply(lambda x: x.astype(np.bool))
     all_df['correct'] = pd.Series(
@@ -820,13 +845,13 @@ if __name__ == "__main__":
     if args.tensorboard_messages:
         # Number of messages limited by sprite size
         ind_size = 64
-        sprite_size = 4096  # Use slightly less for perf
+        sprite_size = 8192  # Use slightly less for perf
         os.makedirs(args.tensorboard_save, exist_ok=True)
-        if all_df.shape[0] > ((4096 / ind_size)**2):
+        if all_df.shape[0] > ((sprite_size / ind_size)**2):
             print(
                 "Warning: too many images, will truncate. Increase sprite size!"
             )
-            all_df = all_df.iloc[:(4096 / ind_size)**2]
+            all_df = all_df.iloc[:(sprite_size / ind_size)**2]
 
         from tensorflow.contrib.tensorboard.plugins import projector
         msg_combined = np.vstack(all_df.msg)
@@ -849,7 +874,7 @@ if __name__ == "__main__":
         md_path = os.path.join(args.tensorboard_save, 'metadata.tsv')
         md_df = all_df[[
             'correct', 'target_color', 'target_shape', 'distractor_color',
-            'distractor_shape', 'relation', 'relation_dir'
+            'distractor_shape', 'relation', 'relation_dir', 'phase'
         ]]
 
         # Make target/distractor strings too

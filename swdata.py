@@ -819,7 +819,8 @@ class SpatialExtraSimple(CaptionAgreementDataset):
             fout.write('\n')
 
 
-def load_components(component_strs, component_path='./data/components/'):
+def load_components(component_strs, component_path='./data/components/',
+                    maxdata=10000):
     components_dict = defaultdict(dict)
     configs = []
     for cstr in tqdm(component_strs, desc='Load components'):
@@ -841,7 +842,7 @@ def load_components(component_strs, component_path='./data/components/'):
                 cstr_td = '{}-{}-{}.pkl.gz'.format(cstr_path, rel, td[0])
                 with gzip.open(cstr_td, 'r') as f_components:
                     components_dict[config_hash][td] = pickle.load(
-                        f_components)
+                        f_components)[:maxdata]
     return configs, dict(components_dict)
 
 
