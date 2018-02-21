@@ -705,7 +705,7 @@ if __name__ == "__main__":
 
                 dev_match = (dev_preds > 0) == dev_labels
                 assert len(dev_match) == args.n_dev
-                dev_hits = np.all(match, axis=1).sum()
+                dev_hits = np.all(dev_match, axis=1).sum()
                 dev_acc = dev_hits / args.n_dev
                 print("Epoch {}: Dev accuracy {}, Loss {}".format(
                     epoch, dev_acc, dev_l))
@@ -760,7 +760,7 @@ if __name__ == "__main__":
             (c['distractor'][0] for c in dev_metadata),
             (c['distractor'][1] for c in dev_metadata),
             dev_true_examples,
-            'dev')
+            itertools.cycle(['dev']))
         all_records.extend(dev_records)
 
     for batch in batches(test_or_train, args.batch_size):
@@ -810,7 +810,7 @@ if __name__ == "__main__":
             (c['distractor'][1] for c in batch_metadata),
             # BSE
             bse_true_examples,
-            'test')
+            itertools.cycle(['test']))
         all_records.extend(batch_records)
 
     all_df = pd.DataFrame.from_records(
