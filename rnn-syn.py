@@ -9,15 +9,15 @@ import net
 import tensorflow as tf
 import numpy as np
 import swdata
-from swdata import (
-    AsymScene, Scene, SWorld, TrainEx, load_components,
-    make_from_components
-)
+from swdata import (AsymScene, Scene, SWorld, TrainEx, load_components,
+                    make_from_components)
 import sys
+import os
 from tensorflow.python import debug as tf_debug
 import pandas as pd
 import itertools
 import gc
+from scipy.misc import imsave
 
 RNN_CELLS = {
     'gru': tf.contrib.rnn.GRUCell,
@@ -43,26 +43,49 @@ CONFIGS = {
     # Generalization to new color/shape pair (triangle + red)
     # After seeing 2 colors and shapes
     'shape_color_generalization_1': {
-        'train': [mkconfig('square-blue', 'square-red'),
-                  mkconfig('square-blue', 'triangle-blue'),
-                  mkconfig('square-red', 'triangle-blue')],
-        'test': [mkconfig('square-blue', 'triangle-red'),
-                 mkconfig('square-red', 'triangle-red'),
-                 mkconfig('triangle-blue', 'triangle-red')]
+        'train': [
+            mkconfig('square-blue', 'square-red'),
+            mkconfig('square-blue', 'triangle-blue'),
+            mkconfig('square-red', 'triangle-blue')
+        ],
+        'test': [
+            mkconfig('square-blue', 'triangle-red'),
+            mkconfig('square-red', 'triangle-red'),
+            mkconfig('triangle-blue', 'triangle-red')
+        ]
     },
     # Generalization to new color/shape pair
     # After seeing 3 colors and 2 shapes
     'shape_color_generalization_2': {
-        'train': mkconfigs(['square-blue', 'square-red', 'triangle-blue', 'square-green', 'triangle-green']),
-        'test': [mkconfig('triangle-red', b) for b in
-                 ['square-blue', 'square-red', 'triangle-blue', 'square-green', 'triangle-green']]
+        'train':
+        mkconfigs([
+            'square-blue', 'square-red', 'triangle-blue', 'square-green',
+            'triangle-green'
+        ]),
+        'test': [
+            mkconfig('triangle-red', b) for b in [
+                'square-blue', 'square-red', 'triangle-blue', 'square-green',
+                'triangle-green'
+            ]
+        ]
     },
     # Generalization to new pair (does it with 100% accuracy, meaning messages encode target/referent
     'new_pair_generalization_1': {
-        'train': [mkconfig('square-blue', 'square-red'), mkconfig('square-red', 'triangle-blue')],
+        'train': [
+            mkconfig('square-blue', 'square-red'),
+            mkconfig('square-red', 'triangle-blue')
+        ],
         'test': [mkconfig('square-blue', 'triangle-blue')]
     }
 }
+
+
+def find_true_example(envslabels):
+    envs, labels = envslabels
+    for env, label in zip(envs, labels):
+        if label == 1.0:
+            return env
+    raise RuntimeError("Coudln't find a True label")
 
 
 def build_feature_model(n_images,
@@ -265,7 +288,7 @@ if __name__ == "__main__":
         '--components',
         action='store_true',
         help='Generate dataset from components instead (cannot be used with '
-             '--data')
+        '--data')
 
     component_args = parser.add_argument_group(
         'components',
@@ -279,13 +302,12 @@ if __name__ == "__main__":
         nargs='+',
         default=CONFIGS['shape_color_generalization_2']['test'])
     component_args.add_argument(
-        '--n_dev', type=int, default=512,
-        help='Dev set size'
-    )
+        '--n_dev', type=int, default=512, help='Dev set size')
     component_args.add_argument(
-        '--n_test', type=int, default=1024,
-        help='Number of testing examples to create from components'
-    )
+        '--n_test',
+        type=int,
+        default=1024,
+        help='Number of testing examples to create from components')
 
     component_args.add_argument(
         '--asym_max_images',
@@ -325,9 +347,14 @@ if __name__ == "__main__":
         action='store_true',
         help='Save tensorboard graph, don\'t do anything else')
     net_opts.add_argument(
+        '--tensorboard_messages',
+        action='store_true',
+        help='Save test (or train if not --test) messages for '
+        'tensorboard embedding visualization')
+    net_opts.add_argument(
         '--tensorboard_save',
         default='./rnn-syn-graph',
-        help='Tensorboard graph save file')
+        help='Tensorboard graph save dir')
 
     train_opts = parser.add_argument_group('train', 'options for net training')
     train_opts.add_argument(
@@ -384,7 +411,7 @@ if __name__ == "__main__":
     save_opts.add_argument(
         '--msgs_file',
         default='data/{data}-{model}-{comm_type}'
-                '{n_comm}-{epochs}epochs-msgs.pkl',
+        '{n_comm}-{epochs}epochs-msgs.pkl',
         help='Save location (can use parser options)')
     save_opts.add_argument(
         '--save_max',
@@ -409,7 +436,6 @@ if __name__ == "__main__":
     elif args.seed is not None:
         tf.set_random_seed(args.seed)
 
-
     if args.components:
         if any(x in args.train_components for x in args.test_components):
             print("Warning: test components in train components, could be"
@@ -428,8 +454,12 @@ if __name__ == "__main__":
             'min_targets': args.asym_min_targets,
             'min_distractors': args.asym_min_distractors
         }
-        train = make_from_components(args.batch_size, configs,
-                                     components_dict, asym_args)
+        train = make_from_components(
+            args.batch_size,
+            configs,
+            components_dict,
+            asym=asym,
+            asym_args=asym_args)
         # To satisfy later args
         metadata = {
             'asym': True,
@@ -437,7 +467,11 @@ if __name__ == "__main__":
         }
         # Generate a dev set
         dev, dev_metadata = zip(*make_from_components(
-            args.n_dev, configs, components_dict, asym_args))
+            args.n_dev,
+            configs,
+            components_dict,
+            asym=asym,
+            asym_args=asym_args))
     else:
         print("Loading data")
         train, metadata = swdata.load_scenes(args.data, gz=True)
@@ -557,8 +591,12 @@ if __name__ == "__main__":
             if args.components:
                 if epoch != 0:
                     # Sample new components
-                    train = make_from_components(args.batch_size, configs,
-                                                 components_dict, asym_args)
+                    train = make_from_components(
+                        args.batch_size,
+                        configs,
+                        components_dict,
+                        asym=asym,
+                        asym_args=asym_args)
             else:
                 # Shuffle training data, since epoch is complete
                 random.shuffle(train)
@@ -568,8 +606,8 @@ if __name__ == "__main__":
             if args.components:
                 batch_iter = [train]
             else:
-                batch_iter = batches(train, args.batch_size,
-                                     max_data=args.max_data)
+                batch_iter = batches(
+                    train, args.batch_size, max_data=args.max_data)
             for batch in batch_iter:
                 batch, batch_metadata = zip(*batch)
                 if args.model == 'feature':
@@ -645,11 +683,11 @@ if __name__ == "__main__":
                 dev_hits = np.all(match, axis=1).sum()
                 dev_acc = dev_hits / args.n_dev
                 print("Epoch {}: Dev accuracy {}, Loss {}".format(
-                    epoch, dev_acc, l
-                ))
+                    epoch, dev_acc, l))
             elif not args.components:
                 acc = hits / total
-                print("Epoch {}: Accuracy {}, Loss {}".format(epoch, acc, loss))
+                print("Epoch {}: Accuracy {}, Loss {}".format(
+                    epoch, acc, loss))
 
                 loss_history.append(loss)
                 acc_history.append(acc)
@@ -672,8 +710,12 @@ if __name__ == "__main__":
             del components_dict
             gc.collect()
             configs, components_dict = load_components(args.test_components)
-            test_or_train = make_from_components(args.n_test, configs,
-                                                 components_dict, asym_args)
+            test_or_train = make_from_components(
+                args.n_test,
+                configs,
+                components_dict,
+                asym=asym,
+                asym_args=asym_args)
     else:
         test_or_train = test if args.test else train
 
@@ -714,6 +756,8 @@ if __name__ == "__main__":
                 t_labels: batch_labels
             })
 
+        bse_true_examples = list(map(find_true_example, zip(bse, bsl)))
+
         batch_records = zip(
             batch_msgs,
             batch_preds,
@@ -724,7 +768,8 @@ if __name__ == "__main__":
             (c['target'][1] for c in batch_metadata),
             (c['distractor'][0] for c in batch_metadata),
             (c['distractor'][1] for c in batch_metadata),
-        )
+            # BSE
+            bse_true_examples)
         batch_records = list(batch_records)  # TEMP
         all_records.extend(batch_records)
 
@@ -732,7 +777,7 @@ if __name__ == "__main__":
         all_records,
         columns=('msg', 'pred', 'obs', 'relation', 'relation_dir',
                  'target_shape', 'target_color', 'distractor_shape',
-                 'distractor_color'))
+                 'distractor_color', 'example_image'))
     all_df.pred = all_df.pred.apply(lambda x: x > 0)
     all_df.obs = all_df.obs.apply(lambda x: x.astype(np.bool))
     all_df['correct'] = pd.Series(
@@ -740,8 +785,10 @@ if __name__ == "__main__":
         dtype=np.bool)
     all_df.relation = all_df.relation.astype('category')
     all_df.relation_dir = all_df.relation_dir > 0
-    for cat_col in ['target_shape', 'target_color', 'distractor_shape',
-                    'distractor_color']:
+    for cat_col in [
+            'target_shape', 'target_color', 'distractor_shape',
+            'distractor_color'
+    ]:
         all_df[cat_col] = all_df[cat_col].astype('category')
 
     if args.test:  # Print test accuracy
@@ -753,3 +800,62 @@ if __name__ == "__main__":
     if not args.no_save_msgs:
         print("Saving {} model predictions".format(all_df.shape[0]))
         all_df.to_pickle((args.msgs_file.format(**vars(args))))
+
+    if args.tensorboard_messages:
+        # Number of messages limited by sprite size
+        ind_size = 64
+        sprite_size = 4096  # Use slightly less for perf
+        os.makedirs(args.tensorboard_save, exist_ok=True)
+        if all_df.shape[0] > ((4096 / ind_size)**2):
+            print(
+                "Warning: too many images, will truncate. Increase sprite size!"
+            )
+            all_df = all_df.iloc[:(4096 / ind_size)**2]
+
+        from tensorflow.contrib.tensorboard.plugins import projector
+        msg_combined = np.vstack(all_df.msg)
+        messages = tf.Variable(
+            tf.convert_to_tensor(
+                msg_combined,
+                name='messages_embed_raw',
+                preferred_dtype=np.float32),
+            name='messages_embed')
+
+        # Save messages to model checkpoint
+        saver = tf.train.Saver([messages])
+        session.run(messages.initializer)
+        saver.save(session, os.path.join(args.tensorboard_save, "model.ckpt"))
+        config = projector.ProjectorConfig()
+        embedding = config.embeddings.add()
+        embedding.tensor_name = messages.name
+
+        # Save metadata
+        md_path = os.path.join(args.tensorboard_save, 'metadata.tsv')
+        all_df[[
+            'correct', 'target_color', 'target_shape', 'distractor_color',
+            'distractor_shape', 'relation', 'relation_dir'
+        ]].to_csv(
+            md_path, sep='\t', index=False)
+
+        embedding.metadata_path = 'metadata.tsv'
+
+        # Sprites
+        sprite_path = os.path.join(args.tensorboard_save, 'sprite.png')
+        # Assume 64px sprites
+        embedding.sprite.image_path = 'sprite.png'
+        embedding.sprite.single_image_dim.extend([ind_size, ind_size])
+        sprite_arr = np.zeros((sprite_size, sprite_size, 3), dtype=np.float32)
+        ex_img_i = 0
+        try:
+            for si in range(0, sprite_size, ind_size):
+                for sj in range(0, sprite_size, ind_size):
+                    ex_img = all_df.example_image[ex_img_i]
+                    sprite_arr[si:si + ind_size, sj:sj + ind_size] = ex_img
+                    ex_img_i += 1
+        except KeyError:
+            assert ex_img_i == len(all_df.example_image)
+        sprite_arr = (sprite_arr * 255).astype(np.uint8)
+        imsave(sprite_path, sprite_arr)
+
+        summary_writer = tf.summary.FileWriter(args.tensorboard_save)
+        projector.visualize_embeddings(summary_writer, config)
