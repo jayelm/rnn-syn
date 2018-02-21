@@ -69,6 +69,22 @@ CONFIGS = {
             ]
         ]
     },
+    # After seeing 3 colors and 3 shapes, importantly: trained on red
+    'shape_color_generalization_3': {
+        'train':
+        mkconfigs([
+            'square-red', 'square-blue', 'square-green',
+            'triangle-blue', 'triangle-green',
+            'circle-red', 'circle-blue', 'circle-green'
+        ]),
+        'test': [
+            mkconfig('triangle-red', b) for b in [
+                'square-red', 'square-blue', 'square-green',
+                'triangle-blue', 'triangle-green',
+                'circle-red', 'circle-blue', 'circle-green'
+            ]
+        ]
+    },
     # Generalization to new pair (does it with 100% accuracy, meaning messages encode target/referent
     'new_pair_generalization_1': {
         'train': [
@@ -296,11 +312,11 @@ if __name__ == "__main__":
     component_args.add_argument(
         '--train_components',
         nargs='+',
-        default=CONFIGS['shape_color_generalization_2']['train'])
+        default=CONFIGS['shape_color_generalization_3']['train'])
     component_args.add_argument(
         '--test_components',
         nargs='+',
-        default=CONFIGS['shape_color_generalization_2']['test'])
+        default=CONFIGS['shape_color_generalization_3']['test'])
     component_args.add_argument(
         '--n_dev', type=int, default=512, help='Dev set size')
     component_args.add_argument(
@@ -831,11 +847,24 @@ if __name__ == "__main__":
 
         # Save metadata
         md_path = os.path.join(args.tensorboard_save, 'metadata.tsv')
-        all_df[[
+        md_df = all_df[[
             'correct', 'target_color', 'target_shape', 'distractor_color',
             'distractor_shape', 'relation', 'relation_dir'
-        ]].to_csv(
-            md_path, sep='\t', index=False)
+        ]]
+
+        # Make target/distractor strings too
+        md_df['target'] = pd.Series(
+            ['{}-{}'.format(x, y)
+             for x, y in zip(md_df.target_shape, md_df.target_color)])
+        md_df['distractor'] = pd.Series(
+            ['{}-{}'.format(x, y)
+             for x, y in zip(md_df.distractor_shape,
+                             md_df.distractor_color)])
+        md_df['config'] = pd.Series(
+            ['{}-{}'.format(x, y)
+             for x, y in zip(md_df.target,
+                             md_df.distractor)])
+        md_df.to_csv(md_path, sep='\t', index=False)
 
         embedding.metadata_path = 'metadata.tsv'
 
