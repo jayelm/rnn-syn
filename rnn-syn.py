@@ -353,7 +353,7 @@ if __name__ == "__main__":
         'tensorboard embedding visualization')
     net_opts.add_argument(
         '--tensorboard_save',
-        default='./rnn-syn-graph',
+        default='./saves/tensorboard/rnn-syn-graph',
         help='Tensorboard graph save dir')
 
     train_opts = parser.add_argument_group('train', 'options for net training')

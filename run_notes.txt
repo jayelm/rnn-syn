@@ -1,5 +1,5 @@
 ZERO-SHOT GENERALIZATION TO NEW OBJECT (TRIANGLE-RED)
-1024 epochs, 20k components, 5/2/1: 0.35449 acc
+1024 epochs, 20k components, 5/2/1: 0.35449 acc (another run resulted in 344)
 1024 epochs, 20k components, 8/2/1: 0.33789 acc
 
 1024 epochs, 20k components, 8/4/4 (keeping numbers constant): 0.202148
