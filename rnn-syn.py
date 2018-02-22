@@ -297,13 +297,15 @@ def build_end2end_model(n_images,
                 labels=t_labels_l, logits=t_pred),
             name='loss')
         return (t_features_raw, t_labels, t_features_raw_l, t_labels_l,
-                (t_msg_discrete if discrete else t_msg), t_pred, t_loss)
+                (t_msg_discrete if discrete else t_msg), t_pred, t_loss,
+                t_features_toplevel_enc, t_features_toplevel_dec)
     else:
         t_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(
                 labels=t_labels, logits=t_pred))
         return (t_features_raw, t_labels, (t_msg_discrete if discrete else
-                                           t_msg), t_pred, t_loss)
+                                           t_msg), t_pred, t_loss,
+                t_features_toplevel_enc, t_features_toplevel_dec)
 
 
 def batches(train, batch_size, max_data=None):
@@ -613,14 +615,14 @@ if __name__ == "__main__":
                 asym=False)
     elif args.model == 'end2end':
         if asym:
-            tfs, tls, tfl, tll, t_msg, t_pred, t_loss = build_end2end_model(
+            tfs, tls, tfl, tll, t_msg, t_pred, t_loss, convs, convl = build_end2end_model(
                 max_images,
                 net_arch=(args.n_hidden, args.n_comm, 1024),
                 discrete=args.comm_type == 'discrete',
                 rnncell=RNN_CELLS[args.rnn_cell],
                 asym=True)
         else:
-            t_features, t_labels, t_msg, t_pred, t_loss = build_end2end_model(
+            t_features, t_labels, t_msg, t_pred, t_loss, convs, convl = build_end2end_model(
                 max_images,
                 net_arch=(args.n_hidden, args.n_comm, 1024),
                 discrete=args.comm_type == 'discrete',
@@ -733,16 +735,16 @@ if __name__ == "__main__":
                     else:
                         raise RuntimeError
                 if asym:
-                    dev_l, dev_preds, dev_msgs = session.run(
-                        [t_loss, t_pred, t_msg], {
+                    dev_l, dev_preds, dev_msgs, dev_convs, dev_convl = session.run(
+                        [t_loss, t_pred, t_msg, convs, convl], {
                         tfs: dev_se,
                         tls: dev_sl,
                         tfl: dev_envs,
                         tll: dev_labels
                     })
                 else:
-                    dev_l, dev_preds, dev_msgs = session.run(
-                        [t_loss, t_pred, t_msg], {
+                    dev_l, dev_preds, dev_msgs, dev_convs, dev_convl = session.run(
+                        [t_loss, t_pred, t_msg, convs, convl], {
                         t_features: dev_envs,
                         t_labels: dev_labels
                     })
@@ -795,6 +797,8 @@ if __name__ == "__main__":
 
         dev_records = zip(
             dev_msgs,
+            dev_convs,
+            dev_convl,
             dev_preds,
             dev_labels,
             (x.relation[0] for x in dev),
@@ -828,14 +832,16 @@ if __name__ == "__main__":
             raise RuntimeError("Unknown model {}".format(args.model))
 
         if asym:
-            batch_msgs, batch_preds = session.run([t_msg, t_pred], {
+            batch_msgs, batch_preds, batch_convs, batch_convl = session.run(
+                [t_msg, t_pred, convs, convl], {
                 tfs: bse,
                 tls: bsl,
                 tfl: batch_envs,
                 tll: batch_labels
             })
         else:
-            batch_msgs, batch_preds = session.run([t_msg, t_pred], {
+            batch_msgs, batch_preds, batch_convs, batch_convl = session.run(
+                [t_msg, t_pred, convs, convl], {
                 t_features: batch_envs,
                 t_labels: batch_labels
             })
@@ -844,6 +850,8 @@ if __name__ == "__main__":
 
         batch_records = zip(
             batch_msgs,
+            batch_convs,
+            batch_convl,
             batch_preds,
             batch_labels,
             (x.relation[0] for x in batch),
@@ -859,7 +867,8 @@ if __name__ == "__main__":
 
     all_df = pd.DataFrame.from_records(
         all_records,
-        columns=('msg', 'pred', 'obs', 'relation', 'relation_dir',
+        columns=('msg', 'convs', 'convl',
+                 'pred', 'obs', 'relation', 'relation_dir',
                  'target_shape', 'target_color', 'distractor_shape',
                  'distractor_color', 'example_image', 'phase'))
     all_df.pred = all_df.pred.apply(lambda x: x > 0)
@@ -883,7 +892,9 @@ if __name__ == "__main__":
 
     if not args.no_save_msgs:
         print("Saving {} model predictions".format(all_df.shape[0]))
-        all_df.to_pickle((args.msgs_file.format(**vars(args))))
+        all_df.drop(
+            columns=['convs', 'convl']
+        ).to_pickle((args.msgs_file.format(**vars(args))))
 
     if args.tensorboard_messages:
         # Number of messages limited by sprite size
