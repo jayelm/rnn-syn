@@ -794,11 +794,13 @@ if __name__ == "__main__":
     if args.components:
         # Add dev messages
         dev_true_examples = list(map(find_true_example, zip(dev_se, dev_sl)))
+        dev_convs_true = list(map(find_true_example, zip(dev_convs, dev_sl)))
+        dev_convl_true = list(map(find_true_example, zip(dev_convl, dev_labels)))
 
         dev_records = zip(
             dev_msgs,
-            dev_convs,
-            dev_convl,
+            dev_convs_true,
+            dev_convl_true,
             dev_preds,
             dev_labels,
             (x.relation[0] for x in dev),
@@ -847,11 +849,13 @@ if __name__ == "__main__":
             })
 
         bse_true_examples = list(map(find_true_example, zip(bse, bsl)))
+        bse_convs_true = list(map(find_true_example, zip(batch_convs, bsl)))
+        bse_convl_true = list(map(find_true_example, zip(batch_convl, batch_labels)))
 
         batch_records = zip(
             batch_msgs,
-            batch_convs,
-            batch_convl,
+            bse_convs_true,
+            bse_convl_true,
             batch_preds,
             batch_labels,
             (x.relation[0] for x in batch),
@@ -908,21 +912,32 @@ if __name__ == "__main__":
             all_df = all_df.iloc[:(sprite_size / ind_size)**2]
 
         from tensorflow.contrib.tensorboard.plugins import projector
-        msg_combined = np.vstack(all_df.msg)
         messages = tf.Variable(
             tf.convert_to_tensor(
-                msg_combined,
+                np.vstack(all_df.msg),
                 name='messages_embed_raw',
                 preferred_dtype=np.float32),
             name='messages_embed')
+        convs_embedding = tf.Variable(
+            tf.convert_to_tensor(
+                np.vstack(all_df.convs),
+                name='convs_embed_raw',
+                preferred_dtype=np.float32),
+            name='convs_embed')
+        convl_embedding = tf.Variable(
+            tf.convert_to_tensor(
+                np.vstack(all_df.convl),
+                name='convl_embed_raw',
+                preferred_dtype=np.float32),
+            name='convl_embed')
 
-        # Save messages to model checkpoint
-        saver = tf.train.Saver([messages])
-        session.run(messages.initializer)
+        # Save and initialize messages to model checkpoint
+        embeddings_to_save = [messages, convs_embedding, convl_embedding]
+        for emts in embeddings_to_save:
+            session.run(emts.initializer)
+        saver = tf.train.Saver(embeddings_to_save)
         saver.save(session, os.path.join(args.tensorboard_save, "model.ckpt"))
         config = projector.ProjectorConfig()
-        embedding = config.embeddings.add()
-        embedding.tensor_name = messages.name
 
         # Save metadata
         md_path = os.path.join(args.tensorboard_save, 'metadata.tsv')
@@ -946,13 +961,9 @@ if __name__ == "__main__":
         md_df['same_color'] = md_df.target_color == md_df.distractor_color
         md_df.to_csv(md_path, sep='\t', index=False)
 
-        embedding.metadata_path = 'metadata.tsv'
-
         # Sprites
         sprite_path = os.path.join(args.tensorboard_save, 'sprite.png')
         # Assume 64px sprites
-        embedding.sprite.image_path = 'sprite.png'
-        embedding.sprite.single_image_dim.extend([ind_size, ind_size])
         sprite_arr = np.zeros((sprite_size, sprite_size, 3), dtype=np.float32)
         ex_img_i = 0
         try:
@@ -965,6 +976,14 @@ if __name__ == "__main__":
             assert ex_img_i == len(all_df.example_image)
         sprite_arr = (sprite_arr * 255).astype(np.uint8)
         imsave(sprite_path, sprite_arr)
+
+        # Messages embedding
+        for embedding_config in embeddings_to_save:
+            this_em = config.embeddings.add()
+            this_em.tensor_name = embedding_config.name
+            this_em.sprite.image_path = 'sprite.png'
+            this_em.sprite.single_image_dim.extend([ind_size, ind_size])
+            this_em.metadata_path = 'metadata.tsv'
 
         summary_writer = tf.summary.FileWriter(args.tensorboard_save)
         projector.visualize_embeddings(summary_writer, config)
