@@ -85,6 +85,48 @@ CONFIGS = {
             ]
         ]
     },
+    'shape_color_generalization_4': {
+        'train':
+        mkconfigs([
+            'square-red', 'square-blue', 'square-green',
+            'triangle-blue', 'triangle-green',
+            'circle-red', 'circle-blue', 'circle-green',
+            'cross-red', 'cross-blue', 'cross-green',
+        ]),
+        'test': [
+            mkconfig('triangle-red', b) for b in [
+                'square-red', 'square-blue', 'square-green',
+                'triangle-blue', 'triangle-green',
+                'circle-red', 'circle-blue', 'circle-green',
+                'cross-red', 'cross-blue', 'cross-green',
+            ]
+        ]
+    },
+    'shape_color_generalization_5': {
+        'train':
+        mkconfigs([
+            'square-red', 'square-blue', 'square-green',
+            'square-cyan', 'square-yellow', 'square-magenta',
+            'triangle-blue', 'triangle-green', # 'triangle-red',
+            'triangle-cyan', 'triangle-yellow', 'triangle-magenta',
+            'circle-red', 'circle-blue', 'circle-green',
+            'circle-cyan', 'circle-yellow', 'circle-magenta',
+            'cross-red', 'cross-blue', 'cross-green',
+            'cross-cyan', 'cross-yellow', 'cross-magenta',
+        ]),
+        'test': [
+            mkconfig('triangle-red', b) for b in [
+                'square-red', 'square-blue', 'square-green',
+                'square-cyan', 'square-yellow', 'square-magenta',
+                'triangle-blue', 'triangle-green',
+                'triangle-cyan', 'triangle-yellow', 'triangle-magenta',
+                'circle-red', 'circle-blue', 'circle-green',
+                'circle-cyan', 'circle-yellow', 'circle-magenta',
+                'cross-red', 'cross-blue', 'cross-green',
+                'cross-cyan', 'cross-yellow', 'cross-magenta',
+            ]
+        ]
+    },
     # Generalization to new pair (does it with 100% accuracy, meaning messages encode target/referent
     'new_pair_generalization_1': {
         'train': [
@@ -312,13 +354,13 @@ if __name__ == "__main__":
     component_args.add_argument(
         '--train_components',
         nargs='+',
-        default=CONFIGS['shape_color_generalization_3']['train'])
+        default=CONFIGS['shape_color_generalization_5']['train'])
     component_args.add_argument(
         '--test_components',
         nargs='+',
-        default=CONFIGS['shape_color_generalization_3']['test'])
+        default=CONFIGS['shape_color_generalization_5']['test'])
     component_args.add_argument(
-        '--n_dev', type=int, default=512, help='Dev set size')
+        '--n_dev', type=int, default=1024, help='Dev set size')
     component_args.add_argument(
         '--n_test',
         type=int,
@@ -890,6 +932,7 @@ if __name__ == "__main__":
             ['{}-{}'.format(x, y)
              for x, y in zip(md_df.target,
                              md_df.distractor)])
+        md_df['same_color'] = md_df.target_color == md_df.distractor_color
         md_df.to_csv(md_path, sep='\t', index=False)
 
         embedding.metadata_path = 'metadata.tsv'
