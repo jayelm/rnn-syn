@@ -893,13 +893,13 @@ if __name__ == "__main__":
     if not args.no_save_msgs:
         print("Saving {} model predictions".format(all_df.shape[0]))
         all_df.drop(
-            columns=['convs', 'convl']
+            ['convs', 'convl'], axis=1
         ).to_pickle((args.msgs_file.format(**vars(args))))
 
     if args.tensorboard_messages:
         # Number of messages limited by sprite size
         ind_size = 64
-        sprite_size = 8192  # Use slightly less for perf
+        sprite_size = 8192
         os.makedirs(args.tensorboard_save, exist_ok=True)
         if all_df.shape[0] > ((sprite_size / ind_size)**2):
             print(
