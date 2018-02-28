@@ -30,6 +30,14 @@ assert SWorld
 assert TrainEx
 
 
+def add_weights(configs, w=10):
+    """Add weight to config if colors are same"""
+    # Add weights to configs. Specifically make 10x as likely
+    return [
+        (c, w if c[0][1] == c[1][1] else 1) for c in configs
+    ]
+
+
 def mkconfig(a, b, n=1000):
     # Just sorts them in order so we can reliably identify the config.
     return '{}-{}-{}'.format(n, *sorted([a, b]))
@@ -101,6 +109,14 @@ CONFIGS = {
                 'cross-red', 'cross-blue', 'cross-green',
             ]
         ]
+    },
+    'colors_only': {
+        'train': [mkconfig('{}-{}'.format(s1, color), '{}-{}'.format(s2, color))
+                  for color in swdata.COLORS
+                  for s1, s2 in itertools.combinations(['square', 'triangle', 'circle', 'cross'], 2)],
+        'test': [mkconfig('{}-{}'.format(s1, color), '{}-{}'.format(s2, color))
+                 for color in swdata.COLORS
+                 for s1, s2 in itertools.combinations(['square', 'triangle', 'circle', 'cross'], 2)],
     },
     'shape_color_generalization_5': {
         'train':
@@ -370,6 +386,10 @@ if __name__ == "__main__":
         help='Number of testing examples to create from components')
 
     component_args.add_argument(
+        '--asym',
+        action='store_true',
+        help='Use asym worlds')
+    component_args.add_argument(
         '--asym_max_images',
         default=5,
         type=int,
@@ -429,7 +449,7 @@ if __name__ == "__main__":
     train_opts.add_argument(
         '--save_path',
         type=str,
-        default='saves/{data}-{model}-model.model',
+        default='saves/{data}-{model}-model.ckpt',
         help='Save model filepath (can use parser options)')
     train_opts.add_argument(
         '--seed',
@@ -508,12 +528,14 @@ if __name__ == "__main__":
                   "repeats depending on size of data")
         # Hardcoded asym
         asym = True
+        actually_asym = args.asym
         if asym:
             print("Generating from components (asym)")
         else:
             raise NotImplementedError
         print("Loading training components")
         configs, components_dict = load_components(args.train_components)
+        #  configs = add_weights(configs)
         # Generate metadata ourself
         asym_args = {
             'max_images': args.asym_max_images,
@@ -524,7 +546,7 @@ if __name__ == "__main__":
             args.batch_size,
             configs,
             components_dict,
-            asym=asym,
+            asym=actually_asym,
             asym_args=asym_args)
         # To satisfy later args
         metadata = {
@@ -536,7 +558,7 @@ if __name__ == "__main__":
             args.n_dev,
             configs,
             components_dict,
-            asym=asym,
+            asym=actually_asym,
             asym_args=asym_args))
         dev_envs = None  # Flag to generate dev envs only once
     else:
@@ -662,7 +684,7 @@ if __name__ == "__main__":
                         args.batch_size,
                         configs,
                         components_dict,
-                        asym=asym,
+                        asym=actually_asym,
                         asym_args=asym_args)
             else:
                 # Shuffle training data, since epoch is complete
@@ -771,18 +793,21 @@ if __name__ == "__main__":
     if args.components:
         if not args.test:
             print("Warning: --components but not --test, using dev")
-            test_or_train = zip(dev, dev_metadata)
+            test_or_train = list(zip(dev, dev_metadata))
         else:
             print("Loading testing components")
             # Make sure memory is free
             del configs, components_dict
             gc.collect()
             configs, components_dict = load_components(args.test_components)
+            # TEMP: test one config
+            #  configs = configs[0]
+            #  configs = add_weights(configs)
             test_or_train = make_from_components(
                 args.n_test,
                 configs,
                 components_dict,
-                asym=asym,
+                asym=actually_asym,
                 asym_args=asym_args)
     else:
         test_or_train = test if args.test else train

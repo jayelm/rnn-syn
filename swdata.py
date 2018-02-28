@@ -30,6 +30,17 @@ from collections import defaultdict
 random = np.random.RandomState()
 
 
+def weighted_choice(choices):
+    total = sum(w for c, w in choices)
+    r = random.uniform(0, total)
+    upto = 0
+    for c, w in choices:
+        if upto + w >= r:
+            return c
+        upto += w
+    assert False, "Shouldn't get here"
+
+
 def invert(d):
     return {v: k for k, v in d.items()}
 
@@ -848,7 +859,7 @@ def load_components(component_strs, component_path='./data/components/',
 
 def make_from_components(n, configs, components_dict, asym=True,
                          asym_args=None,
-                         relation_dir=None):
+                         relation_dir=None, weighted=False):
     """
     Sample `n` training examples
     """
@@ -857,7 +868,10 @@ def make_from_components(n, configs, components_dict, asym=True,
     min_distractors = asym_args['min_distractors']
     scenes = []
     for i in range(n):
-        config = choice1d(configs)
+        if weighted:
+            config = weighted_choice(configs)
+        else:
+            config = choice1d(configs)
         target, distractor, rel = config
         if relation_dir is None:
             # Sample a new rd
@@ -879,10 +893,14 @@ def make_from_components(n, configs, components_dict, asym=True,
                            for _ in range(n_targets_speaker)]
         speaker_distractors = [(choice1d(cc_distractors), distractors_yes)
                                for _ in range(n_distractors_speaker)]
-        listener_targets = [(choice1d(cc_targets), targets_yes)
-                            for _ in range(n_targets_listener)]
-        listener_distractors = [(choice1d(cc_distractors), distractors_yes)
-                                for _ in range(n_distractors_listener)]
+        if asym:
+            listener_targets = [(choice1d(cc_targets), targets_yes)
+                                for _ in range(n_targets_listener)]
+            listener_distractors = [(choice1d(cc_distractors), distractors_yes)
+                                    for _ in range(n_distractors_listener)]
+        else:
+            listener_targets = speaker_targets[:]
+            listener_distractors = speaker_distractors[:]
         speaker_combs = speaker_targets + speaker_distractors
         listener_combs = listener_targets + listener_distractors
         random.shuffle(speaker_combs)
