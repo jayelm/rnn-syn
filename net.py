@@ -43,11 +43,11 @@ def mlp(t_in, widths, activations, name_scope=None):
         return prev_layer
 
 
-def convolve(raw, n_images, n_toplevel_conv, name_scope=None):
-    if name_scope is None:
+def convolve(raw, n_images, n_toplevel_conv, var_scope=None):
+    if var_scope is None:
         ctx = contextlib.ExitStack()
     else:
-        ctx = tf.name_scope(name_scope)
+        ctx = tf.variable_scope(var_scope)
     with ctx:
         conv1_list = []
         for i in range(n_images):
@@ -55,7 +55,9 @@ def convolve(raw, n_images, n_toplevel_conv, name_scope=None):
             t_conv_1 = tf.layers.conv2d(slice, filters=32,
                                         strides=[2, 2],
                                         kernel_size=[5, 5],
-                                        padding='same', activation=tf.nn.relu)
+                                        padding='same', activation=tf.nn.relu,
+                                        reuse=tf.AUTO_REUSE,
+                                        name='conv1')
             conv1_list.append(t_conv_1)
 
         conv1 = tf.stack(conv1_list, axis=1)
@@ -67,7 +69,9 @@ def convolve(raw, n_images, n_toplevel_conv, name_scope=None):
             t_conv_2 = tf.layers.conv2d(slice, filters=64,
                                         strides=[2, 2],
                                         kernel_size=[5, 5],
-                                        padding='same', activation=tf.nn.relu)
+                                        padding='same', activation=tf.nn.relu,
+                                        reuse=tf.AUTO_REUSE,
+                                        name='conv2')
             conv2_list.append(t_conv_2)
 
         conv2 = tf.stack(conv2_list, axis=1)
