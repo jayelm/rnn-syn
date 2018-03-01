@@ -656,7 +656,9 @@ if __name__ == "__main__":
         raise RuntimeError("Unknown model type {}".format(args.model))
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
-    session = tf.Session()
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    session = tf.Session(config=config)
     if args.debug:
         session = tf_debug.LocalCLIDebugWrapperSession(
             session, dump_root='/local/scratch/jlm95/tfdbg/')
