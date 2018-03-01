@@ -411,6 +411,8 @@ if __name__ == "__main__":
     net_opts.add_argument(
         '--n_comm', type=int, default=64, help='Communication layer size')
     net_opts.add_argument(
+        '--n_conv', type=int, default=1024, help='top-layer convolution size (only for end2end)')
+    net_opts.add_argument(
         '--comm_type',
         type=str,
         default='continuous',
@@ -639,14 +641,14 @@ if __name__ == "__main__":
         if asym:
             tfs, tls, tfl, tll, t_msg, t_pred, t_loss, convs, convl = build_end2end_model(
                 max_images,
-                net_arch=(args.n_hidden, args.n_comm, 1024),
+                net_arch=(args.n_hidden, args.n_comm, args.n_conv),
                 discrete=args.comm_type == 'discrete',
                 rnncell=RNN_CELLS[args.rnn_cell],
                 asym=True)
         else:
             t_features, t_labels, t_msg, t_pred, t_loss, convs, convl = build_end2end_model(
                 max_images,
-                net_arch=(args.n_hidden, args.n_comm, 1024),
+                net_arch=(args.n_hidden, args.n_comm, args.n_conv),
                 discrete=args.comm_type == 'discrete',
                 rnncell=RNN_CELLS[args.rnn_cell],
                 asym=False)
