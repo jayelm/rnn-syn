@@ -818,7 +818,7 @@ if __name__ == "__main__":
     print("Eval test")
     all_records = []
 
-    if args.components:
+    if args.components and args.test:
         # Add dev messages
         dev_true_examples = list(map(find_true_example, zip(dev_se, dev_sl)))
         dev_convs_true = list(map(find_true_example, zip(dev_convs, dev_sl)))
