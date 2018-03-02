@@ -8,13 +8,13 @@
 set -e
 
 # 1. Fix the 256-dimensional hidden message, and vary message size m.
-for i in 2 5 128 900; do
+for i in 2 5 64 128 900; do
     for k in 1; do
     # for k in 1 2 3 4 5; do  # TODO: Eventually run many.
         python -u rnn_syn.py --components \
-            --epochs 2048 \
+            --epochs 5000 \
             --model end2end \
-            --msgs_file "data/arch_msg_test_2048_ncomm$i.$k.pkl" \
+            --msgs_file "data/arch_msg_test_5000_ncomm$i.$k.pkl" \
             --batch_size 128 \
             --asym_max_images 5 \
             --asym_min_targets 2 \
@@ -31,13 +31,13 @@ done
 # we're not saying that the networks will never result in a degenreate solution
 # in general; saying that even with (fairly substantial) bandwith, the emergent
 # protocol is fairly simple
-for i in 2 5 128 900; do
+for i in 5 64 128 900; do
     for k in 1; do
     # for k in 1 2 3 4 5; do  # TODO: Eventually run many.
         python -u rnn_syn.py --components \
-            --epochs 2048 \
+            --epochs 5000 \
             --model end2end \
-            --msgs_file "data/arch_rnn_test_2048_nhidden$i.$k.pkl" \
+            --msgs_file "data/arch_rnn_test_5000_nhidden$i.$k.pkl" \
             --batch_size 128 \
             --asym_max_images 5 \
             --asym_min_targets 2 \
@@ -54,9 +54,9 @@ done
 
 # Finally, try the smallest model
 python -u rnn_syn.py --components \
-    --epochs 2048 \
+    --epochs 5000 \
     --model end2end \
-    --msgs_file "data/arch_small_test_2048.pkl" \
+    --msgs_file "data/arch_small_test_5000.pkl" \
     --batch_size 128 \
     --asym_max_images 5 \
     --asym_min_targets 2 \
