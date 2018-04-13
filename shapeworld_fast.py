@@ -4,7 +4,8 @@ import numpy as np
 import random
 from PIL import Image
 import aggdraw
-import tensorflow as tf
+from enum import Enum
+from tqdm import trange
 
 
 DIM = 64
@@ -15,11 +16,21 @@ SIZE_MIN, SIZE_MAX = (4, 10)
 TWOFIVEFIVE = np.float32(255)
 
 
+SHAPES = ['circle', 'square', 'ellipse']
 COLORS = ['red', 'blue', 'green', 'yellow', 'white']
 #  COLORS = ['red', 'blue', 'green', 'yellow', 'white']
 #  COLORS = ['magenta']
 BRUSHES = {c: aggdraw.Brush(c) for c in COLORS}
 PENS = {c: aggdraw.Pen(c) for c in COLORS}
+
+
+class ShapeSpec(Enum):
+    SHAPE = 0
+    COLOR = 1
+    BOTH = 2
+
+
+SHAPE_SPECS = list(ShapeSpec)
 
 
 def rand_size():
@@ -30,14 +41,20 @@ def rand_pos():
 
 
 class Shape:
-    def __init__(self):
-        self.color = random.choice(COLORS)
+    def __init__(self, color=None):
+        if color is None:
+            self.color = random.choice(COLORS)
+        else:
+            self.color = color
         self.x = rand_pos()
         self.y = rand_pos()
         self.init_shape()
 
     def draw(self, image):
         image.draw.polygon(self.coords, PENS[self.color])
+
+    def intersects(self, oth):
+        return self.shape.intersects(oth.shape)
 
 
 class Ellipse(Shape):
@@ -80,6 +97,13 @@ class Square(Shape):
         image.draw.polygon(self.coords, BRUSHES[self.color])
 
 
+SHAPE_IMPLS = {
+    'circle': Circle,
+    'square': Square,
+    'ellipse': Ellipse,
+}
+
+
 class I:
     def __init__(self):
         self.image = Image.new('RGB', (DIM, DIM))
@@ -106,30 +130,91 @@ class I:
         self.image.save(path, filetype)
 
 
-N = 100
-WORLDS_PER_INSTANCE = 10
+def random_shape():
+    return random.choice(SHAPES)
 
 
-imgs = np.zeros((N, WORLDS_PER_INSTANCE, 64, 64, 3), dtype=np.uint8)
-print(imgs.nbytes)
-import sys
-print(sys.getsizeof(imgs))
-labels = np.zeros((N, WORLDS_PER_INSTANCE), dtype=np.uint8)
+def random_color():
+    return random.choice(COLORS)
 
-from tqdm import trange
-for n in trange(N):
-    for wpi in range(WORLDS_PER_INSTANCE):
-        img = I()
-        shapes = [Square() for _ in range(2)] + [Ellipse() for _ in range(5)]
-        img.draw_shapes(shapes)
-        imgs[n, wpi] = img.array()
-        labels[n, wpi] = random.randrange(2)
 
-print(imgs.nbytes)
-print(labels.nbytes)
-np.savez_compressed('hello.npz', imgs=imgs, labels=labels)
-#  shapes = [Ellipse()]
-#  print(shapes[0].coords)
+def random_shape_from_spec(spec):
+    shape = None
+    color = None
+    if spec == ShapeSpec.SHAPE:
+        shape = random_shape()
+    elif spec == ShapeSpec.COLOR:
+        color = random_color()
+    elif spec == ShapeSpec.BOTH:
+        shape = random_shape()
+        color = random_color()
+    else:
+        raise ValueError("Unknown spec {}".format(spec))
+    return (shape, color)
 
-#  img.draw_shapes(shapes)
-#  img.show()
+
+def random_config():
+    # 0 -> only shape specified
+    # 1 -> only color specified
+    # 2 -> only both specified
+    shape_1_spec = random.choice(SHAPE_SPECS)
+    shape_2_spec = random.choice(SHAPE_SPECS)
+    shape_1 = random_shape_from_spec(shape_1_spec)
+    shape_2 = random_shape_from_spec(shape_2_spec)
+    if shape_1 == shape_2:
+        return random_config()
+    relation = random.randrange(2)
+    relation_dir = random.randrange(2)
+    return ([shape_1, shape_2], relation, relation_dir)
+
+
+def add_shape_from_spec(spec, shapes, attempt=1, max_attempts=3):
+    if attempt > max_attempts:
+        return False
+    shape_, color = spec
+    if shape_ is None:
+        shape_ = random_shape()
+    shape = SHAPE_IMPLS[shape_](color=color)
+    for oth in shapes:
+        if shape.intersects(oth):
+            print("Collision, retrying (attempt {})".format(attempt))
+            return add_shape_from_spec(spec, shapes, attempt=attempt + 1,
+                                       max_attempts=max_attempts)
+    shapes.append(shape)
+    return True
+
+
+if __name__ == '__main__':
+    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+
+    parser = ArgumentParser(
+        description='Fast ShapeWorld',
+        formatter_class=ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument('--n', type=int, default=100, help='Number of instances')
+    parser.add_argument('--wpi', type=int, default=10, help='Worlds per instance')
+
+    args = parser.parse_args()
+
+    N = 100
+    WORLDS_PER_INSTANCE = 10
+
+    imgs = np.zeros((args.n, args.wpi, 64, 64, 3), dtype=np.uint8)
+    labels = np.zeros((args.n, args.wpi), dtype=np.uint8)
+
+    for n in trange(args.n):
+        for wpi in range(args.wpi):
+            shape_specs, relation, relation_dir = random_config()
+            shapes = []
+            for shape_spec in shape_specs:
+                add_shape_from_spec(shape_spec, shapes)
+            continue
+            # Sample world type:
+            # Both well specified - one well specified - neither well specified
+            # Based on that, generate random shape reqs
+            img = I()
+            img.draw_shapes(shapes)
+            imgs[n, wpi] = img.array()
+            labels[n, wpi] = random.randrange(2)
+
+    np.savez_compressed('test.npz', imgs=imgs, labels=labels)
