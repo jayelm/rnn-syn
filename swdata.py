@@ -23,13 +23,43 @@ from itertools import cycle
 import time
 import multiprocessing as mp
 import subprocess
+from random import choice as choice1d
+from collections import defaultdict
 
 
 random = np.random.RandomState()
 
 
+def weighted_choice(choices):
+    total = sum(w for c, w in choices)
+    r = random.uniform(0, total)
+    upto = 0
+    for c, w in choices:
+        if upto + w >= r:
+            return c
+        upto += w
+    assert False, "Shouldn't get here"
+
+
 def invert(d):
     return {v: k for k, v in d.items()}
+
+
+def sample_asym(max_images, min_targets, min_distractors):
+    """
+    Sample a random number of targets between min_targets and
+    max_images - min_distractors
+    """
+    n_targets = random.randint(
+        min_targets, max_images - min_distractors + 1)
+    n_left = max_images - n_targets
+    assert n_left >= min_distractors
+    # Sample a number of distractors between min_distractors and
+    # the number of possible images left
+    n_distractors = random.randint(
+        min_distractors, n_left + 1)
+    assert (n_targets + n_distractors) <= max_images
+    return n_targets, n_distractors
 
 
 COLORS = [
@@ -74,6 +104,15 @@ VOCABULARY = sorted([
 
 # Used for training
 TrainEx = namedtuple('TrainEx', ['world', 'metadata'])
+
+
+# Parse an argparse --configs string
+def parse_configs(configs_str):
+    configs = [tuple(c.split('-')) + ('solid', )
+               for c in configs_str.split(',')]
+    if not all(len(c) == 3 for c in configs):
+        raise ValueError("Invalid config format")
+    return configs
 
 
 def pickle_scenes(scenes, save_file='data/dataset.pkl', gz=True):
@@ -403,40 +442,83 @@ class SpatialExtraSimple(CaptionAgreementDataset):
     """
 
     def __init__(self,
+                 target=None,
+                 distractor=None,
                  combinations=None,
                  relation=None,
-                 relation_dir=None,
-                 target_i=None):
+                 relation_dir=None):
         # Randomly sample combinations and relations if not provided
-        if combinations is None:
-            combinations = (None, None)
-            while combinations[0] == combinations[1]:
-                combinations = tuple(random_objects(2))
+        if (target is not None and
+                distractor is not None and combinations):
+            raise ValueError(
+                "Can't specify both target/distractor and possible "
+                "combinations")
+
+        if isinstance(target, list):
+            target_combinations = choice1d(target)
+        elif isinstance(target, tuple):
+            target_combinations = target
+        elif target is None:
+            if isinstance(combinations, list):
+                if len(combinations) < 1:
+                    raise ValueError("Need more combinations")
+                target_combinations = choice1d(combinations)
+                assert isinstance(target_combinations, tuple)
+            elif combinations is None:
+                target_combinations, = random_objects(1)
+            else:
+                raise ValueError
+        else:
+            raise ValueError
+
+        if isinstance(distractor, list):
+            distractor_combinations = random.choice(distractor)
+        elif isinstance(distractor, tuple):
+            distractor_combinations = distractor
+        elif distractor is None:
+            distractor_combinations = (None, None)
+            while (distractor_combinations == (None, None) or
+                    distractor_combinations == target_combinations):
+                # TODO: Support multiple distractors
+                if isinstance(combinations, list):
+                    if len(combinations) < 1:
+                        raise ValueError("Need more combinations")
+                    distractor_combinations = choice1d(combinations)
+                    assert isinstance(distractor_combinations, tuple)
+                elif combinations is None:
+                    distractor_combinations, = random_objects(1)
+                else:
+                    raise ValueError
+        else:
+            raise ValueError
+
+        self.target_i = random.randint(2)
+        self.target_obj = target_combinations
+        # TODO: Make this distractor_objs, supportm multiple distractors
+        self.distractor_obj = distractor_combinations
+
+        if self.target_i == 0:
+            self.shapes = [target_combinations, distractor_combinations]
+        else:
+            self.shapes = [distractor_combinations, target_combinations]
+
+        # Relations and directories
         if relation is None:
             relation = random.choice(RELATIONS)
-
-        if len(combinations) > 2:
-            # TODO: Extend to multishape case
-            raise NotImplementedError
-
-        self.shapes = combinations
+        assert relation in ('x-rel', 'y-rel'), "Invalid relation"
         self.relation = relation
 
         if relation_dir is None:
             self.relation_dir = random.choice([1, -1])
-        if target_i is None:
-            self.target_i = random.randint(len(self.shapes))
-            self.target_obj = self.shapes[self.target_i]
-            self.distractor_obj = self.shapes[1 - self.target_i]
-
-        assert relation in ('x-rel', 'y-rel'), "Invalid relation"
+        else:
+            self.relation_dir = relation_dir
 
         vocabulary = VOCABULARY
 
         world_generator = FixedWorldGenerator(
             entity_counts=[2],
-            validation_combinations=combinations,
-            test_combinations=combinations,
+            validation_combinations=tuple(self.shapes[:]),
+            test_combinations=tuple(self.shapes[:]),
             max_provoke_collision_rate=0.0,
             collision_tolerance=0.0,
             boundary_tolerance=0.0)
@@ -540,20 +622,6 @@ class SpatialExtraSimple(CaptionAgreementDataset):
                 targets, distractors,
                 n_targets=n_targets, n_distractors=n_distractors)
 
-    def sample_asym(self, max_images, min_targets, min_distractors):
-        # Sample a random number of targets between min_targets and
-        # max_images - min_distractors
-        n_targets = random.randint(
-            min_targets, max_images - min_distractors + 1)
-        n_left = max_images - n_targets
-        assert n_left >= min_distractors
-        # Sample a number of distractors between min_distractors and
-        # the number of possible images left
-        n_distractors = random.randint(
-            min_distractors, n_left + 1)
-        assert (n_targets + n_distractors) <= max_images
-        return n_targets, n_distractors
-
     def combine_targets_distractors_asym(self, targets, distractors,
                                          max_images=5,
                                          min_targets=2,
@@ -566,9 +634,9 @@ class SpatialExtraSimple(CaptionAgreementDataset):
         asym_scenes = []
         try:
             while True:
-                n_targets_speaker, n_distractors_speaker = self.sample_asym(
+                n_targets_speaker, n_distractors_speaker = sample_asym(
                     max_images, min_targets, min_distractors)
-                n_targets_listener, n_distractors_listener = self.sample_asym(
+                n_targets_listener, n_distractors_listener = sample_asym(
                     max_images, min_targets, min_distractors)
                 speaker_targets = [(targets.pop(), 1)
                                    for _ in range(n_targets_speaker)]
@@ -762,26 +830,121 @@ class SpatialExtraSimple(CaptionAgreementDataset):
             fout.write('\n')
 
 
+def load_components(component_strs, component_path='./data/components/',
+                    maxdata=500, n_cpu=1):
+    components_dict = defaultdict(dict)
+    configs = []
+    for cstr in tqdm(component_strs, desc='Load components'):
+        if cstr.endswith('-x') or cstr.endswith('-y'):
+            raise NotImplementedError("Can't test specific relations")
+        cstr_path = os.path.join(component_path, cstr)
+
+        # Extract target and distractor by shaving off the number
+        cstr_td_pieces = cstr.split('-')[1:]
+        target = tuple(cstr_td_pieces[:2])
+        distractor = tuple(cstr_td_pieces[2:])
+
+        for rel in ['x', 'y']:
+            config_hash = (target, distractor, '{}-rel'.format(rel))
+            assert config_hash not in configs
+            configs.append(config_hash)
+            for td in ['targets', 'distractors']:
+                # Load either targets or distractors
+                cstr_td = '{}-{}-{}.pkl.gz'.format(cstr_path, rel, td[0])
+                with gzip.open(cstr_td, 'r') as f_components:
+                    components_dict[config_hash][td] = pickle.load(
+                        f_components)[:maxdata]
+    return configs, dict(components_dict)
+
+
+def make_from_components(n, configs, components_dict, asym=True,
+                         asym_args=None,
+                         relation_dir=None, weighted=False):
+    """
+    Sample `n` training examples
+    """
+    max_images = asym_args['max_images']
+    min_targets = asym_args['min_targets']
+    min_distractors = asym_args['min_distractors']
+    scenes = []
+    for i in range(n):
+        if weighted:
+            config = weighted_choice(configs)
+        else:
+            config = choice1d(configs)
+        target, distractor, rel = config
+        if relation_dir is None:
+            # Sample a new rd
+            rd = 1 if random.randint(2) else -1
+        elif isinstance(relation_dir, int):
+            assert relation_dir == 1 or relation_dir == -1
+            rd = relation_dir
+        else:
+            raise ValueError("Unknown relation dir {}".format(relation_dir))
+        cc_targets = components_dict[config]['targets']
+        cc_distractors = components_dict[config]['distractors']
+        n_targets_speaker, n_distractors_speaker = sample_asym(
+            max_images, min_targets, min_distractors)
+        n_targets_listener, n_distractors_listener = sample_asym(
+            max_images, min_targets, min_distractors)
+        targets_yes = 1 if rd == 1 else 0
+        distractors_yes = 0 if rd == 1 else 1
+        speaker_targets = [(choice1d(cc_targets), targets_yes)
+                           for _ in range(n_targets_speaker)]
+        speaker_distractors = [(choice1d(cc_distractors), distractors_yes)
+                               for _ in range(n_distractors_speaker)]
+        if asym:
+            listener_targets = [(choice1d(cc_targets), targets_yes)
+                                for _ in range(n_targets_listener)]
+            listener_distractors = [(choice1d(cc_distractors), distractors_yes)
+                                    for _ in range(n_distractors_listener)]
+        else:
+            listener_targets = speaker_targets[:]
+            listener_distractors = speaker_distractors[:]
+        speaker_combs = speaker_targets + speaker_distractors
+        listener_combs = listener_targets + listener_distractors
+        random.shuffle(speaker_combs)
+        random.shuffle(listener_combs)
+        speaker_sworlds, speaker_labels = zip(*speaker_combs)
+        listener_sworlds, listener_labels = zip(*listener_combs)
+        speaker_sworlds = list(map(to_sworld, speaker_sworlds))
+        listener_sworlds = list(map(to_sworld, listener_sworlds))
+        scene = AsymScene(speaker_worlds=speaker_sworlds,
+                          speaker_labels=np.array(speaker_labels),
+                          listener_worlds=listener_sworlds,
+                          listener_labels=np.array(listener_labels),
+                          relation=rel,
+                          relation_dir=rd)
+        scene = flatten_asym_scene(scene)
+        metadata = {
+            'config': i,
+            'n': 1,
+            'relation': config[-1],
+            'relation_dir': rd,
+            'target': list(target) + ['solid'],
+            'distractor': list(distractor) + ['solid'],
+        }
+        scenes.append(TrainEx(scene, metadata))
+    return scenes
+
+
 def gen_dataset(iargs):
     i, args = iargs
     if i is not None:
         t = time.time()
         print("{} Started".format(i))
         sys.stdout.flush()
-    n, max_n, n_targets, n_distractors, save_folder, asym, asym_args = args
-    dataset = SpatialExtraSimple()
+    (n, max_n, n_targets, n_distractors,
+     save_folder, asym, asym_args, target, distractor,
+     configs, pickle) = args
+    dataset = SpatialExtraSimple(combinations=configs)
     train = dataset.generate(
         max_n, n_targets=n_targets, n_distractors=n_distractors,
         asym=asym, asym_args=asym_args)
     if i is not None:
         print("{} Finished ({}s)".format(i, round(time.time() - t, 2)))
         sys.stdout.flush()
-    # Save data
-    save_file = '{}.pkl.gz'.format(n)
-    pickle_scenes(
-        train, save_file=os.path.join(save_folder, save_file), gz=True)
-    # Return config metadata
-    return {
+    metadata = {
         'config': n,
         'n': len(train),
         'relation': dataset.relation,
@@ -789,6 +952,77 @@ def gen_dataset(iargs):
         'target': dataset.target_obj,
         'distractor': dataset.distractor_obj
     }
+    # Save data
+    if pickle:
+        save_file = '{}.pkl.gz'.format(n)
+        pickle_scenes(
+            train, save_file=os.path.join(save_folder, save_file), gz=True)
+        return metadata
+    # Otherwise, return the dataset itself with the metadata
+    return train, metadata
+
+
+def gen_datasets(n_configs, samples_each_config,
+                 n_targets, n_distractors, target=None, distractor=None,
+                 configs=None, save_folder=None,
+                 asym=False, asym_args=None, pickle=False,
+                 n_cpu=1):
+    if pickle and save_folder is None:
+        raise ValueError("Must specify save_folder if pickling")
+
+    args1 = (samples_each_config, n_targets,
+             n_distractors, save_folder,
+             asym, asym_args, target, distractor, configs,
+             pickle)
+    # Index the datasets by config
+    dataset_args = [(i, ) + args1 for i in range(n_configs)]
+
+    if n_cpu == 1:  # Non-mp, track progress with tqdm
+        dataset_metas = []
+        if not pickle:
+            trains = []
+        for dargs in tqdm(list(zip(cycle([None]), dataset_args))):
+            if pickle:
+                dataset_meta = gen_dataset(dargs)
+                dataset_metas.append(dataset_meta)
+            else:
+                train, dataset_meta = gen_dataset(dargs)
+                dataset_metas.append(dataset_meta)
+                trains.append(train)
+    else:
+        t = time.time()
+        print("Multiprocessing")
+        pool = mp.Pool(n_cpu)
+        if pickle:
+            dataset_metas = pool.map(gen_dataset, list(enumerate(dataset_args)))
+        else:
+            trains, dataset_metas = zip(
+                *pool.map(gen_dataset, list(enumerate(dataset_args))))
+        pool.close()
+        pool.join()
+        print("Elapsed time: {}s".format(round(time.time() - t, 2)))
+
+    metadata = {
+        'n': sum(d['n'] for d in dataset_metas),
+        'n_configs': n_configs,
+        'samples_each_config': samples_each_config,
+        'n_targets': None if asym else n_targets,
+        'n_distractors': None if asym else n_distractors,
+        'asym': True,
+        'asym_args': None if not asym else asym_args,
+        'configs': dataset_metas
+    }
+
+    if pickle:
+        # Save dataset metadata and return nothing
+        print("Writing metadata")
+        with open(os.path.join(save_folder, 'metadata.json'), 'w') as fout:
+            json.dump(metadata, fout, sort_keys=True,
+                      indent=2, separators=(',', ': '))
+        print("Done")
+    else:
+        # Return training data and dataset metas
+        return trains, metadata
 
 
 if __name__ == "__main__":
@@ -819,9 +1053,12 @@ if __name__ == "__main__":
         action='store_true',
         help='Construct scenes with different (random) images on '
              'speaker/listener side')
+    parser.add_argument('--configs', type=str, default='',
+                        help='Manually specify possible configs '
+                             'as `color-shape` pairs, comma-separated')
     parser.add_argument(
         '--save_folder',
-        default='data/{n_configs}_{samples_each_config}_asym{asym}',
+        default='data/{configs}{n_configs}_{samples_each_config}_asym{asym}',
         help='Save folder (can use other args)')
     parser.add_argument(
         '--n_cpu',
@@ -855,6 +1092,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.configs:
+        configs = parse_configs(args.configs)
+        # Make configs a slightly better format
+        args.configs = '_'.join('-'.join(c) for c in sorted(configs))
+    else:
+        configs = None
+
     # Check save folder.
     save_folder = args.save_folder.format(**vars(args))
     if os.path.exists(save_folder):
@@ -878,41 +1122,11 @@ if __name__ == "__main__":
     }
 
     print("Generating data")
-    args1 = (args.samples_each_config, args.n_targets,
-             args.n_distractors, save_folder,
-             args.asym, asym_args)
-    # Index the datasets by config
-    dataset_args = [(i, ) + args1 for i in range(args.n_configs)]
-
-    if args.n_cpu == 1:  # Non-mp, track progress with tqdm
-        dataset_metas = []
-        for dargs in tqdm(list(zip(cycle([None]), dataset_args))):
-            dataset_meta = gen_dataset(dargs)
-            dataset_metas.append(dataset_meta)
-    else:
-        t = time.time()
-        print("Multiprocessing")
-        pool = mp.Pool(args.n_cpu)
-        dataset_metas = pool.map(gen_dataset, list(enumerate(dataset_args)))
-        pool.close()
-        pool.join()
-        print("Elapsed time: {}s".format(round(time.time() - t, 2)))
-
-    print("Writing metadata")
-    metadata = {
-        'n': sum(d['n'] for d in dataset_metas),
-        'n_configs': args.n_configs,
-        'samples_each_config': args.samples_each_config,
-        'n_targets': None if args.asym else args.n_targets,
-        'n_distractors': None if args.asym else args.n_distractors,
-        'asym': True,
-        'asym_args': None if not args.asym else asym_args,
-        'configs': dataset_metas
-    }
-    with open(os.path.join(save_folder, 'metadata.json'), 'w') as fout:
-        json.dump(metadata, fout, sort_keys=True,
-                  indent=2, separators=(',', ': '))
-    print("Done")
+    gen_datasets(
+        args.n_configs, args.samples_each_config,
+        args.n_targets, args.n_distractors, configs=configs,
+        save_folder=save_folder,
+        asym=args.asym, asym_args=asym_args, pickle=True)
 
     if args.verify_load:
         try:

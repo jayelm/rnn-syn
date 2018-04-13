@@ -6,5 +6,12 @@ __pycache__
 test/
 saves/*
 !saves/README.md
-data/
+!saves/tensorboard
+saves/tensorboard/*
+!saves/tensorboard/README.md
+
+data/*
 /*graph/
+!data/components
+data/components/*
+!data/components/README.md

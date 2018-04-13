@@ -1,4 +1,4 @@
-# Learning compositional communication protocols in end-to-end reference games
+# Learning and communicating visual concepts in a raw pixel reference game
 
 Requires Python 3.4+, and [ShapeWorld](https://github.com/AlexKuhnle/ShapeWorld), among other things.
 
