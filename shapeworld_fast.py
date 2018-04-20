@@ -10,6 +10,9 @@ from tqdm import trange
 
 DIM = 64
 X_MIN, X_MAX = (8, 48)
+ONE_QUARTER = (X_MAX - X_MIN) // 3
+X_MIN_34, X_MAX_34 = (X_MIN + ONE_QUARTER, X_MAX - ONE_QUARTER)
+BUFFER = 10
 SIZE_MIN, SIZE_MAX = (3, 9)
 
 
@@ -53,13 +56,42 @@ def rand_pos():
 
 
 class Shape:
-    def __init__(self, color=None):
+    def __init__(self, x=None, y=None,
+                 relation=None, relation_dir=None, color=None):
         if color is None:
             self.color = random.choice(COLORS)
         else:
             self.color = color
-        self.x = rand_pos()
-        self.y = rand_pos()
+        if x is not None or y is not None:
+            assert x is not None and y is not None
+            assert relation is None and relation_dir is None
+            self.x = x
+            self.y = y
+        elif relation is None and relation_dir is None:
+            self.x = rand_pos()
+            self.y = rand_pos()
+        else:
+            # Generate on 3/4 of image according to relation dir
+            if relation == 0:
+                # x matters - y is totally random
+                self.y = rand_pos()
+                if relation_dir == 0:
+                    # Place right 3/4 of screen, so second shape
+                    # can be placed LEFT
+                    self.x = random.randrange(X_MIN_34, X_MAX)
+                else:
+                    # Place left 3/4
+                    self.x = random.randrange(X_MIN, X_MAX_34)
+            else:
+                # y matters - x is totally random
+                self.x = rand_pos()
+                if relation_dir == 0:
+                    # Place top 3/4 of screen, so second shape can be placed
+                    # BELOW
+                    # NOTE: Remember coords for y travel in opp dir
+                    self.y = random.randrange(X_MIN, X_MAX_34)
+                else:
+                    self.y = random.randrange(X_MIN_34, X_MAX)
         self.init_shape()
 
     def draw(self, image):
@@ -108,9 +140,18 @@ class Circle(Ellipse):
 
 
 class Rectangle(Shape):
-    def init_shape(self):
+    def init_shape(self, min_skew=1.5):
         self.dx = rand_size_2()
-        self.dy = rand_size_2()
+        bigger = int(self.dx * min_skew)
+        if bigger >= SIZE_MAX:
+            smaller = int(self.dx / min_skew)
+            self.dy = random.randrange(SIZE_MIN, smaller)
+        else:
+            self.dy = random.randrange(bigger, SIZE_MAX)
+        if random.random() < 0.5:
+            # Switch dx, dy
+            self.dx, self.dy = self.dy, self.dx
+
         shape = box(self.x, self.y, self.x + self.dx, self.y + self.dy)
         # Rotation
         shape = affinity.rotate(shape, random.randrange(90))
@@ -208,21 +249,51 @@ def random_config():
     return [shape_1, shape_2], None, relation, relation_dir
 
 
-def add_shape_from_spec(spec, shapes=None, attempt=1, max_attempts=3):
+def add_shape_from_spec(spec, relation, relation_dir,
+                        shapes=None, attempt=1, max_attempts=3):
     if attempt > max_attempts:
         return None
     color, shape_ = spec
     if shape_ is None:
         shape_ = random_shape()
-    shape = SHAPE_IMPLS[shape_](color=color)
+    shape = SHAPE_IMPLS[shape_](relation=relation, relation_dir=relation_dir,
+                                color=color)
     if shapes is not None:
         for oth in shapes:
             if shape.intersects(oth):
-                return add_shape_from_spec(spec, shapes, attempt=attempt + 1,
+                return add_shape_from_spec(spec, relation, relation_dir,
+                                           shapes=shapes,
+                                           attempt=attempt + 1,
                                            max_attempts=max_attempts)
         shapes.append(shape)
         return shape
     return shape
+
+
+def add_shape_rel(spec, oth_shape, relation, relation_dir):
+    """
+    Add shape, obeying the relation/relation_dir w.r.t. oth shape
+    """
+    color, shape_ = spec
+    if shape_ is None:
+        shape_ = random_shape()
+    if relation == 0:
+        new_y = rand_pos()
+        if relation_dir == 0:
+            # Shape must be LEFT of oth shape
+            new_x = random.randrange(X_MIN, oth_shape.x - BUFFER)
+        else:
+            # Shape RIGHT of oth shape
+            new_x = random.randrange(oth_shape.x + BUFFER, X_MAX)
+    else:
+        new_x = rand_pos()
+        if relation_dir == 0:
+            # BELOW (remember y coords reversed)
+            new_y = random.randrange(oth_shape.y + BUFFER, X_MAX)
+        else:
+            # ABOVE
+            new_y = random.randrange(X_MIN, oth_shape.y - BUFFER)
+    return SHAPE_IMPLS[shape_](x=new_x, y=new_y, color=color)
 
 
 def new_color(existing_color):
@@ -252,8 +323,7 @@ def invalidate(config):
         properties.append(ConfigProps.SHAPE_2_COLOR)
     if shape_2_shape is not None:
         properties.append(ConfigProps.SHAPE_2_SHAPE)
-    # Don't invalidate relation dir, since it can be invalidated separately
-    #  properties.append(ConfigProps.RELATION_DIR)
+    properties.append(ConfigProps.RELATION_DIR)
     # Randomly select property to invalidate
     # TODO: Support for invalidating multiple properties
     invalid_prop = random.choice(properties)
@@ -286,9 +356,9 @@ def fmt_config(config):
             rel_txt = 'right'
     else:
         if relation_dir == 0:
-            rel_txt = 'above'
-        else:
             rel_txt = 'below'
+        else:
+            rel_txt = 'above'
     if s1[0] is None:
         s1_0_txt = ''
     else:
@@ -334,40 +404,19 @@ if __name__ == '__main__':
             new_config = config if label else invalidate(config)
             print("\t", new_config)
             (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
-            s1 = add_shape_from_spec(ss1)
-            s2 = add_shape_from_spec(ss2)
+            s2 = add_shape_from_spec(ss2, relation, relation_dir)
 
             attempts = 0
             while attempts < 5:
-                s2 = add_shape_from_spec(ss2)
+                # TODO: Support extra shapes
+                s1 = add_shape_rel(ss1, s2, relation, relation_dir)
                 if not s2.intersects(s1):
                     break
             else:
                 # Failed
                 raise RuntimeError
 
-            # Figure out if relation dir is correct.
-            s1_centroid = s1.shape.centroid
-            s2_centroid = s2.shape.centroid
-            if relation == 0:
-                if s1_centroid.x > s2_centroid.x:
-                    this_rel_dir = 1
-                else:
-                    this_rel_dir = 0
-            elif relation == 1:
-                if s1_centroid.y > s2_centroid.y:
-                    this_rel_dir = 1
-                else:
-                    this_rel_dir = 0
-
-            if this_rel_dir != relation_dir:
-                # Make sure label is false, even if the config was invalidated
-                # in the first place.
-                label = 0
-
-            # Sample world type:
-            # Both well specified - one well specified - neither well specified
-            # Based on that, generate random shape reqs
+            # Create image and draw shapes
             img = I()
             img.draw_shapes([s1, s2])
             imgs[n, wpi] = img.array()
