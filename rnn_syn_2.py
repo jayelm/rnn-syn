@@ -116,14 +116,12 @@ if __name__ == '__main__':
 
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
-    #  config = tf.ConfigProto()
-    #  config.gpu_options.allow_growth = True
-    #  session = tf.Session(config=config)
-    session = tf.Session()
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    session = tf.Session(config=config)
     session.run(tf.global_variables_initializer())
 
     for batch_i in range(args.n_batches):
-        import ipdb; ipdb.set_trace()
         feat_spk, lab_spk, configs = sf.generate(args.batch_size,
                                                  args.max_images,
                                                  args.correct_proportion,
