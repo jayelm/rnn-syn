@@ -7,7 +7,6 @@ import aggdraw
 from enum import Enum
 from tqdm import trange
 
-
 DIM = 64
 X_MIN, X_MAX = (8, 48)
 ONE_QUARTER = (X_MAX - X_MIN) // 3
@@ -15,9 +14,7 @@ X_MIN_34, X_MAX_34 = (X_MIN + ONE_QUARTER, X_MAX - ONE_QUARTER)
 BUFFER = 10
 SIZE_MIN, SIZE_MAX = (3, 9)
 
-
 TWOFIVEFIVE = np.float32(255)
-
 
 SHAPES = ['circle', 'square', 'rectangle', 'ellipse']
 COLORS = ['red', 'blue', 'green', 'yellow', 'white', 'gray']
@@ -56,8 +53,12 @@ def rand_pos():
 
 
 class Shape:
-    def __init__(self, x=None, y=None,
-                 relation=None, relation_dir=None, color=None):
+    def __init__(self,
+                 x=None,
+                 y=None,
+                 relation=None,
+                 relation_dir=None,
+                 color=None):
         if color is None:
             self.color = random.choice(COLORS)
         else:
@@ -158,7 +159,9 @@ class Rectangle(Shape):
         self.shape = shape
 
         # Get coords
-        self.coords = np.round(np.array(self.shape.exterior.coords)[:-1].flatten()).astype(np.int).tolist()
+        self.coords = np.round(
+            np.array(self.shape.exterior.coords)[:-1].flatten()).astype(
+                np.int).tolist()
 
     def draw(self, image):
         image.draw.polygon(self.coords, BRUSHES[self.color], PENS[self.color])
@@ -173,7 +176,9 @@ class Square(Rectangle):
         self.shape = shape
 
         # Get coords
-        self.coords = np.round(np.array(self.shape.exterior.coords)[:-1].flatten()).astype(np.int).tolist()
+        self.coords = np.round(
+            np.array(self.shape.exterior.coords)[:-1].flatten()).astype(
+                np.int).tolist()
 
 
 SHAPE_IMPLS = {
@@ -249,22 +254,29 @@ def random_config():
     return [shape_1, shape_2], None, relation, relation_dir
 
 
-def add_shape_from_spec(spec, relation, relation_dir,
-                        shapes=None, attempt=1, max_attempts=3):
+def add_shape_from_spec(spec,
+                        relation,
+                        relation_dir,
+                        shapes=None,
+                        attempt=1,
+                        max_attempts=3):
     if attempt > max_attempts:
         return None
     color, shape_ = spec
     if shape_ is None:
         shape_ = random_shape()
-    shape = SHAPE_IMPLS[shape_](relation=relation, relation_dir=relation_dir,
-                                color=color)
+    shape = SHAPE_IMPLS[shape_](
+        relation=relation, relation_dir=relation_dir, color=color)
     if shapes is not None:
         for oth in shapes:
             if shape.intersects(oth):
-                return add_shape_from_spec(spec, relation, relation_dir,
-                                           shapes=shapes,
-                                           attempt=attempt + 1,
-                                           max_attempts=max_attempts)
+                return add_shape_from_spec(
+                    spec,
+                    relation,
+                    relation_dir,
+                    shapes=shapes,
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts)
         shapes.append(shape)
         return shape
     return shape
@@ -313,7 +325,8 @@ def new_shape(existing_shape):
 def invalidate(config):
     # Invalidate by randomly choosing one property to change:
     ((shape_1_color, shape_1_shape),
-     (shape_2_color, shape_2_shape)), extra_shape_specs, relation, relation_dir = config
+     (shape_2_color,
+      shape_2_shape)), extra_shape_specs, relation, relation_dir = config
     properties = []
     if shape_1_color is not None:
         properties.append(ConfigProps.SHAPE_1_COLOR)
@@ -330,19 +343,24 @@ def invalidate(config):
 
     if invalid_prop == ConfigProps.SHAPE_1_COLOR:
         return ((new_color(shape_1_color), shape_1_shape),
-                (shape_2_color, shape_2_shape)), extra_shape_specs, relation, relation_dir
+                (shape_2_color,
+                 shape_2_shape)), extra_shape_specs, relation, relation_dir
     elif invalid_prop == ConfigProps.SHAPE_1_SHAPE:
         return ((shape_1_color, new_shape(shape_1_shape)),
-                (shape_2_color, shape_2_shape)), extra_shape_specs, relation, relation_dir
+                (shape_2_color,
+                 shape_2_shape)), extra_shape_specs, relation, relation_dir
     elif invalid_prop == ConfigProps.SHAPE_2_COLOR:
         return ((shape_1_color, shape_1_shape),
-                (new_color(shape_2_color), shape_2_shape)), extra_shape_specs, relation, relation_dir
+                (new_color(shape_2_color),
+                 shape_2_shape)), extra_shape_specs, relation, relation_dir
     elif invalid_prop == ConfigProps.SHAPE_2_SHAPE:
-        return ((shape_1_color, shape_1_shape),
-                (shape_2_color, new_shape(shape_2_shape))), extra_shape_specs, relation, relation_dir
+        return ((shape_1_color, shape_1_shape), (shape_2_color,
+                                                 new_shape(shape_2_shape))
+                ), extra_shape_specs, relation, relation_dir
     elif invalid_prop == ConfigProps.RELATION_DIR:
         return ((shape_1_color, shape_1_shape),
-                (shape_2_color, shape_2_shape)), extra_shape_specs, relation, 1 - relation_dir
+                (shape_2_color,
+                 shape_2_shape)), extra_shape_specs, relation, 1 - relation_dir
     else:
         raise RuntimeError
 
@@ -375,8 +393,8 @@ def fmt_config(config):
         s2_1_txt = 'shape'
     else:
         s2_1_txt = s2[1]
-    return '{} {} {} {} {}'.format(s1_0_txt, s1_1_txt, rel_txt.upper(), s2_0_txt, s2_1_txt)
-
+    return '{} {} {} {} {}'.format(s1_0_txt, s1_1_txt,
+                                   rel_txt.upper(), s2_0_txt, s2_1_txt)
 
 
 if __name__ == '__main__':
@@ -386,10 +404,12 @@ if __name__ == '__main__':
         description='Fast ShapeWorld',
         formatter_class=ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--n', type=int, default=100, help='Number of instances')
-    parser.add_argument('--wpi', type=int, default=10, help='Worlds per instance')
-    parser.add_argument('--correct', type=float, default=0.5,
-                        help='Correct proportion')
+    parser.add_argument(
+        '--n', type=int, default=100, help='Number of instances')
+    parser.add_argument(
+        '--wpi', type=int, default=10, help='Worlds per instance')
+    parser.add_argument(
+        '--correct', type=float, default=0.5, help='Correct proportion')
 
     args = parser.parse_args()
 
@@ -425,13 +445,15 @@ if __name__ == '__main__':
             labels[n, wpi] = label
             #  img.show()
 
-    for instance_idx, (instance, instance_labels) in enumerate(zip(imgs, labels)):
-        for world_idx, (world, label) in enumerate(zip(instance, instance_labels)):
-            Image.fromarray(world).save('test/{}_{}.png'.format(instance_idx, world_idx))
+    for instance_idx, (instance, instance_labels) in enumerate(
+            zip(imgs, labels)):
+        for world_idx, (world, label) in enumerate(
+                zip(instance, instance_labels)):
+            Image.fromarray(world).save('test/{}_{}.png'.format(
+                instance_idx, world_idx))
 
     with open('test/index.html', 'w') as f:
-        f.write(
-            '''
+        f.write('''
             <!DOCTYPE html>
             <html>
             <head>
@@ -453,11 +475,12 @@ if __name__ == '__main__':
             </body>
             </html>
             '''.format(
-                ''.join(
-                    '<h1>{}</h1><p>{}</p>'.format(fmt_config(config), ''.join(
-                        '<img src="{}_{}.png" class="{}">'.format(instance_idx, world_idx, 'yes' if label else 'no') for world_idx, (world, label) in enumerate(zip(instance, instance_labels))
-                    )) for instance_idx, (instance, instance_labels, config) in enumerate(zip(imgs, labels, configs))
-                )
-            )
-        )
+            ''.join('<h1>{}</h1><p>{}</p>'.format(
+                fmt_config(config), ''.
+                join('<img src="{}_{}.png" class="{}">'.format(
+                    instance_idx, world_idx, 'yes' if label else 'no')
+                     for world_idx, (world, label) in enumerate(
+                         zip(instance, instance_labels))))
+                    for instance_idx, (instance, instance_labels, config) in
+                    enumerate(zip(imgs, labels, configs)))))
     np.savez_compressed('test.npz', imgs=imgs, labels=labels)
