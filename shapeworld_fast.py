@@ -433,7 +433,7 @@ def generate_image(mp_args):
 
 
 def generate(n, wpi, correct, float_type=False, n_cpu=None,
-             pool=None):
+             pool=None, verbose=False):
     pool_was_none = False
     if pool is None:
         pool_was_none = True
@@ -447,8 +447,10 @@ def generate(n, wpi, correct, float_type=False, n_cpu=None,
 
     mp_args = [(wpi, correct) for _ in range(n)]
 
-    for i, (imgs, labels, config) in tqdm(
-        enumerate(pool.imap_unordered(generate_image, mp_args)), total=n):
+    gen_iter = enumerate(pool.imap_unordered(generate_image, mp_args))
+    if verbose:
+        gen_iter = tqdm(gen_iter, total=n)
+    for i, (imgs, labels, config) in gen_iter:
         all_imgs[i, ] = imgs
         all_labels[i, ] = labels
         configs.append(config)
@@ -523,6 +525,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    imgs, labels, configs = generate(args.n, args.wpi, args.correct)
+    imgs, labels, configs = generate(args.n, args.wpi, args.correct,
+                                     verbose=True)
 
     save_images('./test/', imgs, labels, configs)

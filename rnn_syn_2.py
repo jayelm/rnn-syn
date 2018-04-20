@@ -146,5 +146,5 @@ if __name__ == '__main__':
         match = (preds > 0) == lab_lis
         hits = np.all(match, axis=1).sum()
         total = len(match)
-        print("Train accuracy: {} loss: {}".format(hits / total,
-                                                   batch_loss))
+        print("Batch {}: train accuracy: {} loss: {}".format(
+            batch_i, hits / total, batch_loss))
