@@ -7,6 +7,7 @@ import tensorflow as tf
 import shapeworld_fast as sf
 import numpy as np
 import random
+import multiprocessing as mp
 
 
 def shuffle_envs_labels(envs, labels):
@@ -107,6 +108,7 @@ if __name__ == '__main__':
                         help='Maximum number of images')
     parser.add_argument('--n_batches', type=int, default=1000)
     parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--n_cpu', type=int, default=12)
     parser.add_argument('--correct_proportion', type=float, default=0.5,
                         help='Correct proportion')
 
@@ -121,11 +123,15 @@ if __name__ == '__main__':
     session = tf.Session(config=config)
     session.run(tf.global_variables_initializer())
 
+    # Init pool here
+    pool = mp.Pool(args.n_cpu)
+
     for batch_i in range(args.n_batches):
         feat_spk, lab_spk, configs = sf.generate(args.batch_size,
                                                  args.max_images,
                                                  args.correct_proportion,
-                                                 float_type=True)
+                                                 float_type=True,
+                                                 pool=pool)
 
         # Shuffle images for listener
         feat_lis, lab_lis = shuffle_envs_labels(feat_spk, lab_spk)
@@ -140,4 +146,5 @@ if __name__ == '__main__':
         match = (preds > 0) == lab_lis
         hits = np.all(match, axis=1).sum()
         total = len(match)
-        print("Train accuracy: {}".format(hits / total))
+        print("Train accuracy: {} loss: {}".format(hits / total,
+                                                   batch_loss))

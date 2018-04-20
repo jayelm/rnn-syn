@@ -432,14 +432,19 @@ def generate_image(mp_args):
     return imgs, labels, config
 
 
-def generate(n, wpi, correct, float_type=False, n_cpu=None):
-    if n_cpu is None:
-        n_cpu = mp.cpu_count()
+def generate(n, wpi, correct, float_type=False, n_cpu=None,
+             pool=None):
+    pool_was_none = False
+    if pool is None:
+        pool_was_none = True
+        if n_cpu is None:
+            n_cpu = mp.cpu_count()
+        pool = mp.Pool(n_cpu)
+
     all_imgs = np.zeros((n, wpi, 64, 64, 3), dtype=np.uint8)
     all_labels = np.zeros((n, wpi), dtype=np.uint8)
     configs = []
 
-    pool = mp.Pool(n_cpu)
     mp_args = [(wpi, correct) for _ in range(n)]
 
     for i, (imgs, labels, config) in tqdm(
@@ -447,6 +452,10 @@ def generate(n, wpi, correct, float_type=False, n_cpu=None):
         all_imgs[i, ] = imgs
         all_labels[i, ] = labels
         configs.append(config)
+
+    if pool_was_none:  # Remember to close the pool
+        pool.close()
+        pool.join()
 
     if float_type:
         all_imgs = np.divide(all_imgs, TWOFIVEFIVE)
