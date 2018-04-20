@@ -5,8 +5,9 @@ import random
 from PIL import Image
 import aggdraw
 from enum import Enum
-from tqdm import trange
+from tqdm import tqdm
 import os
+import multiprocessing as mp
 
 DIM = 64
 X_MIN, X_MAX = (8, 48)
@@ -398,38 +399,59 @@ def fmt_config(config):
                                    rel_txt.upper(), s2_0_txt, s2_1_txt)
 
 
-def generate(n, wpi, correct):
-    imgs = np.zeros((n, wpi, 64, 64, 3), dtype=np.uint8)
-    labels = np.zeros((n, wpi), dtype=np.uint8)
+def generate_image(mp_args):
+    """
+    Generate a single image
+    """
+    wpi, correct = mp_args
+    # Get shapes and relations
+    imgs = np.zeros((wpi, 64, 64, 3), dtype=np.uint8)
+    labels = np.zeros((wpi, ), dtype=np.uint8)
+    config = random_config()
+    for wpi_ in range(wpi):
+        label = int(random.random() < correct)
+        new_config = config if label else invalidate(config)
+        (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
+        s2 = add_shape_from_spec(ss2, relation, relation_dir)
+
+        attempts = 0
+        while attempts < 5:
+            # TODO: Support extra shapes
+            s1 = add_shape_rel(ss1, s2, relation, relation_dir)
+            if not s2.intersects(s1):
+                break
+        else:
+            # Failed
+            raise RuntimeError
+
+        # Create image and draw shapes
+        img = I()
+        img.draw_shapes([s1, s2])
+        imgs[wpi_] = img.array()
+        labels[wpi_] = label
+    return imgs, labels, config
+
+
+def generate(n, wpi, correct, float_type=False, n_cpu=None):
+    if n_cpu is None:
+        n_cpu = mp.cpu_count()
+    all_imgs = np.zeros((n, wpi, 64, 64, 3), dtype=np.uint8)
+    all_labels = np.zeros((n, wpi), dtype=np.uint8)
     configs = []
 
-    for n_ in trange(n):
-        # Get shapes and relations
-        config = random_config()
+    pool = mp.Pool(n_cpu)
+    mp_args = [(wpi, correct) for _ in range(n)]
+
+    for i, (imgs, labels, config) in tqdm(
+        enumerate(pool.imap_unordered(generate_image, mp_args)), total=n):
+        all_imgs[i, ] = imgs
+        all_labels[i, ] = labels
         configs.append(config)
-        for wpi in range(wpi):
-            label = int(random.random() < correct)
-            new_config = config if label else invalidate(config)
-            print("\t", new_config)
-            (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
-            s2 = add_shape_from_spec(ss2, relation, relation_dir)
 
-            attempts = 0
-            while attempts < 5:
-                # TODO: Support extra shapes
-                s1 = add_shape_rel(ss1, s2, relation, relation_dir)
-                if not s2.intersects(s1):
-                    break
-            else:
-                # Failed
-                raise RuntimeError
-
-            # Create image and draw shapes
-            img = I()
-            img.draw_shapes([s1, s2])
-            imgs[n_, wpi] = img.array()
-            labels[n_, wpi] = label
-    return imgs, labels, configs
+    if float_type:
+        all_imgs = np.divide(all_imgs, TWOFIVEFIVE)
+        all_labels = all_labels.astype(np.float32)
+    return all_imgs, all_labels, configs
 
 
 def save_images(dir, imgs, labels, configs):
