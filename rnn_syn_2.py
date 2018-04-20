@@ -152,3 +152,6 @@ if __name__ == '__main__':
         total = len(match)
         print("Batch {}: train accuracy: {} loss: {}".format(
             batch_i, hits / total, batch_loss))
+
+    pool.close()
+    pool.join()
