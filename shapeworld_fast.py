@@ -388,6 +388,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--n', type=int, default=100, help='Number of instances')
     parser.add_argument('--wpi', type=int, default=10, help='Worlds per instance')
+    parser.add_argument('--correct', type=float, default=0.5,
+                        help='Correct proportion')
 
     args = parser.parse_args()
 
@@ -400,7 +402,7 @@ if __name__ == '__main__':
         config = random_config()
         configs.append(config)
         for wpi in range(args.wpi):
-            label = int(random.random() < 0.5)
+            label = int(random.random() < args.correct)
             new_config = config if label else invalidate(config)
             print("\t", new_config)
             (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
