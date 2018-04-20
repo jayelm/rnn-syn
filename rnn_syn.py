@@ -143,6 +143,19 @@ CONFIGS = {
             ]
         ]
     },
+    'standard': {
+        'train':
+        mkconfigs([
+            'square-red', 'square-blue', 'square-green',
+            'square-cyan', 'square-yellow', 'square-magenta',
+            'triangle-blue', 'triangle-green', 'triangle-red',
+            'triangle-cyan', 'triangle-yellow', 'triangle-magenta',
+            'circle-red', 'circle-blue', 'circle-green',
+            'circle-cyan', 'circle-yellow', 'circle-magenta',
+            'cross-red', 'cross-blue', 'cross-green',
+            'cross-cyan', 'cross-yellow', 'cross-magenta',
+        ]),
+    },
     # Generalization to new pair (does it with 100% accuracy, meaning messages encode target/referent
     'new_pair_generalization_1': {
         'train': [

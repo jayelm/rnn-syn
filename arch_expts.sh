@@ -11,7 +11,7 @@ set -e
 for i in 2 5 64 128 900; do
     for k in 1; do
     # for k in 1 2 3 4 5; do  # TODO: Eventually run many.
-        python -u rnn_syn.py --components \
+        python3 -u rnn_syn.py --components \
             --epochs 5000 \
             --model end2end \
             --msgs_file "data/arch_msg_test_5000_ncomm$i.$k.pkl" \
@@ -34,7 +34,7 @@ done
 for i in 5 64 128 900; do
     for k in 1; do
     # for k in 1 2 3 4 5; do  # TODO: Eventually run many.
-        python -u rnn_syn.py --components \
+        python3 -u rnn_syn.py --components \
             --epochs 5000 \
             --model end2end \
             --msgs_file "data/arch_rnn_test_5000_nhidden$i.$k.pkl" \
@@ -53,7 +53,7 @@ done
 # as big as (or bigger) than the message sizes we try, if that's any consolation
 
 # Finally, try the smallest model
-python -u rnn_syn.py --components \
+python3 -u rnn_syn.py --components \
     --epochs 5000 \
     --model end2end \
     --msgs_file "data/arch_small_test_5000.pkl" \

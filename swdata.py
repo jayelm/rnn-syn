@@ -831,7 +831,7 @@ class SpatialExtraSimple(CaptionAgreementDataset):
 
 
 def load_components(component_strs, component_path='./data/components/',
-                    maxdata=500, n_cpu=1):
+                    maxdata=256, n_cpu=1):
     components_dict = defaultdict(dict)
     configs = []
     for cstr in tqdm(component_strs, desc='Load components'):
