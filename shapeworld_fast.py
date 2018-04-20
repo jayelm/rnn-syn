@@ -395,8 +395,8 @@ def fmt_config(config):
         s2_1_txt = 'shape'
     else:
         s2_1_txt = s2[1]
-    return '{} {} {} {} {}'.format(s1_0_txt, s1_1_txt,
-                                   rel_txt.upper(), s2_0_txt, s2_1_txt)
+    return '{} {} {} {} {}'.format(s1_0_txt, s1_1_txt, rel_txt.upper(),
+                                   s2_0_txt, s2_1_txt)
 
 
 def generate_image(mp_args):
@@ -432,8 +432,13 @@ def generate_image(mp_args):
     return imgs, labels, config
 
 
-def generate(n, wpi, correct, float_type=False, n_cpu=None,
-             pool=None, verbose=False):
+def generate(n,
+             wpi,
+             correct,
+             float_type=False,
+             n_cpu=None,
+             pool=None,
+             verbose=False):
     pool_was_none = False
     if pool is None:
         pool_was_none = True
@@ -471,8 +476,8 @@ def save_images(dir, imgs, labels, configs):
             zip(imgs, labels)):
         for world_idx, (world, label) in enumerate(
                 zip(instance, instance_labels)):
-            Image.fromarray(world).save(os.path.join(
-                dir, '{}_{}.png'.format(instance_idx, world_idx)))
+            Image.fromarray(world).save(
+                os.path.join(dir, '{}_{}.png'.format(instance_idx, world_idx)))
 
     index_fname = os.path.join(dir, 'index.html')
     with open(index_fname, 'w') as f:
@@ -497,15 +502,17 @@ def save_images(dir, imgs, labels, configs):
             {}
             </body>
             </html>
-            '''.format(
-            ''.join('<h1>{}</h1><p>{}</p>'.format(
-                fmt_config(config), ''.
-                join('<img src="{}_{}.png" class="{}">'.format(
-                    instance_idx, world_idx, 'yes' if label else 'no')
-                     for world_idx, (world, label) in enumerate(
-                         zip(instance, instance_labels))))
-                    for instance_idx, (instance, instance_labels, config) in
-                    enumerate(zip(imgs, labels, configs)))))
+            '''.format(''.join(
+            '<h1>{}</h1><p>{}</p>'.format(
+                fmt_config(config), ''.join(
+                    '<img src="{}_{}.png" class="{}">'.format(
+                        instance_idx, world_idx, 'yes' if label else 'no')
+                    for world_idx, (
+                        world,
+                        label) in enumerate(zip(instance, instance_labels))))
+            for instance_idx, (
+                instance, instance_labels,
+                config) in enumerate(zip(imgs, labels, configs)))))
     np.savez_compressed('test.npz', imgs=imgs, labels=labels)
 
 
@@ -525,7 +532,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    imgs, labels, configs = generate(args.n, args.wpi, args.correct,
-                                     verbose=True)
+    imgs, labels, configs = generate(
+        args.n, args.wpi, args.correct, verbose=True)
 
     save_images('./test/', imgs, labels, configs)

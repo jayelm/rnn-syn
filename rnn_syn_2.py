@@ -79,8 +79,8 @@ def build_end2end_model(n_images,
         t_expand_msg = tf.expand_dims(t_msg, axis=1)
         t_tile_message = tf.tile(t_expand_msg, (1, n_images, 1))
 
-    t_features_toplevel_dec = net.convolve(
-        t_features_raw_l, n_images, n_toplevel_conv, 'conv_listener')
+    t_features_toplevel_dec = net.convolve(t_features_raw_l, n_images,
+                                           n_toplevel_conv, 'conv_listener')
     t_out_feats = tf.concat(
         (t_tile_message, t_features_toplevel_dec),
         axis=2,
@@ -92,29 +92,31 @@ def build_end2end_model(n_images,
         tf.nn.sigmoid_cross_entropy_with_logits(
             labels=t_labels_l, logits=t_pred),
         name='loss')
-    return (t_features_raw, t_labels, t_features_raw_l, t_labels_l,
-            t_msg, t_pred, t_loss,
-            t_features_toplevel_enc, t_features_toplevel_dec)
+    return (t_features_raw, t_labels, t_features_raw_l, t_labels_l, t_msg,
+            t_pred, t_loss, t_features_toplevel_enc, t_features_toplevel_dec)
 
 
 if __name__ == '__main__':
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
     parser = ArgumentParser(
-        description='RNN SYN 2',
-        formatter_class=ArgumentDefaultsHelpFormatter)
+        description='RNN SYN 2', formatter_class=ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--max_images', type=int, default=20,
-                        help='Maximum number of images')
+    parser.add_argument(
+        '--max_images', type=int, default=20, help='Maximum number of images')
     parser.add_argument('--n_batches', type=int, default=1000)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--n_cpu', type=int, default=12)
-    parser.add_argument('--correct_proportion', type=float, default=0.5,
-                        help='Correct proportion')
+    parser.add_argument(
+        '--correct_proportion',
+        type=float,
+        default=0.5,
+        help='Correct proportion')
 
     args = parser.parse_args()
 
-    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l = build_end2end_model(args.max_images)
+    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l = build_end2end_model(
+        args.max_images)
 
     optimizer = tf.train.AdamOptimizer(0.001)
     o_train = optimizer.minimize(t_loss)
@@ -127,21 +129,23 @@ if __name__ == '__main__':
     pool = mp.Pool(args.n_cpu)
 
     for batch_i in range(args.n_batches):
-        feat_spk, lab_spk, configs = sf.generate(args.batch_size,
-                                                 args.max_images,
-                                                 args.correct_proportion,
-                                                 float_type=True,
-                                                 pool=pool)
+        feat_spk, lab_spk, configs = sf.generate(
+            args.batch_size,
+            args.max_images,
+            args.correct_proportion,
+            float_type=True,
+            pool=pool)
 
         # Shuffle images for listener
         feat_lis, lab_lis = shuffle_envs_labels(feat_spk, lab_spk)
 
-        batch_loss, preds, _ = session.run([t_loss, t_pred, o_train], {
-            t_feat_spk: feat_spk,
-            t_lab_spk: lab_spk,
-            t_feat_lis: feat_lis,
-            t_lab_lis: lab_lis
-        })
+        batch_loss, preds, _ = session.run(
+            [t_loss, t_pred, o_train], {
+                t_feat_spk: feat_spk,
+                t_lab_spk: lab_spk,
+                t_feat_lis: feat_lis,
+                t_lab_lis: lab_lis
+            })
 
         match = (preds > 0) == lab_lis
         hits = np.all(match, axis=1).sum()
