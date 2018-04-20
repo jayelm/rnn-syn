@@ -6,6 +6,7 @@ from PIL import Image
 import aggdraw
 from enum import Enum
 from tqdm import trange
+import os
 
 DIM = 64
 X_MIN, X_MAX = (8, 48)
@@ -397,32 +398,17 @@ def fmt_config(config):
                                    rel_txt.upper(), s2_0_txt, s2_1_txt)
 
 
-if __name__ == '__main__':
-    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-
-    parser = ArgumentParser(
-        description='Fast ShapeWorld',
-        formatter_class=ArgumentDefaultsHelpFormatter)
-
-    parser.add_argument(
-        '--n', type=int, default=100, help='Number of instances')
-    parser.add_argument(
-        '--wpi', type=int, default=10, help='Worlds per instance')
-    parser.add_argument(
-        '--correct', type=float, default=0.5, help='Correct proportion')
-
-    args = parser.parse_args()
-
-    imgs = np.zeros((args.n, args.wpi, 64, 64, 3), dtype=np.uint8)
-    labels = np.zeros((args.n, args.wpi), dtype=np.uint8)
+def generate(n, wpi, correct):
+    imgs = np.zeros((n, wpi, 64, 64, 3), dtype=np.uint8)
+    labels = np.zeros((n, wpi), dtype=np.uint8)
     configs = []
 
-    for n in trange(args.n):
+    for n_ in trange(n):
         # Get shapes and relations
         config = random_config()
         configs.append(config)
-        for wpi in range(args.wpi):
-            label = int(random.random() < args.correct)
+        for wpi in range(wpi):
+            label = int(random.random() < correct)
             new_config = config if label else invalidate(config)
             print("\t", new_config)
             (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
@@ -441,18 +427,22 @@ if __name__ == '__main__':
             # Create image and draw shapes
             img = I()
             img.draw_shapes([s1, s2])
-            imgs[n, wpi] = img.array()
-            labels[n, wpi] = label
-            #  img.show()
+            imgs[n_, wpi] = img.array()
+            labels[n_, wpi] = label
+    return imgs, labels, configs
 
+
+def save_images(dir, imgs, labels, configs):
+    # Save to test directory
     for instance_idx, (instance, instance_labels) in enumerate(
             zip(imgs, labels)):
         for world_idx, (world, label) in enumerate(
                 zip(instance, instance_labels)):
-            Image.fromarray(world).save('test/{}_{}.png'.format(
-                instance_idx, world_idx))
+            Image.fromarray(world).save(os.path.join(
+                dir, '{}_{}.png'.format(instance_idx, world_idx)))
 
-    with open('test/index.html', 'w') as f:
+    index_fname = os.path.join(dir, 'index.html')
+    with open(index_fname, 'w') as f:
         f.write('''
             <!DOCTYPE html>
             <html>
@@ -484,3 +474,24 @@ if __name__ == '__main__':
                     for instance_idx, (instance, instance_labels, config) in
                     enumerate(zip(imgs, labels, configs)))))
     np.savez_compressed('test.npz', imgs=imgs, labels=labels)
+
+
+if __name__ == '__main__':
+    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+
+    parser = ArgumentParser(
+        description='Fast ShapeWorld',
+        formatter_class=ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument(
+        '--n', type=int, default=100, help='Number of instances')
+    parser.add_argument(
+        '--wpi', type=int, default=10, help='Worlds per instance')
+    parser.add_argument(
+        '--correct', type=float, default=0.5, help='Correct proportion')
+
+    args = parser.parse_args()
+
+    imgs, labels, configs = generate(args.n, args.wpi, args.correct)
+
+    save_images('./test/', imgs, labels, configs)
