@@ -43,6 +43,11 @@ def rand_size():
     return random.randrange(SIZE_MIN, SIZE_MAX)
 
 
+def rand_size_2():
+    """Slightly bigger."""
+    return random.randrange(SIZE_MIN + 2, SIZE_MAX + 2)
+
+
 def rand_pos():
     return random.randrange(X_MIN, X_MAX)
 
@@ -104,8 +109,8 @@ class Circle(Ellipse):
 
 class Rectangle(Shape):
     def init_shape(self):
-        self.dx = rand_size()
-        self.dy = rand_size()
+        self.dx = rand_size_2()
+        self.dy = rand_size_2()
         shape = box(self.x, self.y, self.x + self.dx, self.y + self.dy)
         # Rotation
         shape = affinity.rotate(shape, random.randrange(90))
@@ -120,7 +125,7 @@ class Rectangle(Shape):
 
 class Square(Rectangle):
     def init_shape(self):
-        self.size = rand_size()
+        self.size = rand_size_2()
         shape = box(self.x, self.y, self.x + self.size, self.y + self.size)
         # Rotation
         shape = affinity.rotate(shape, random.randrange(90))
@@ -325,7 +330,7 @@ if __name__ == '__main__':
         config = random_config()
         configs.append(config)
         for wpi in range(args.wpi):
-            label = int(random.random() < 0.75)
+            label = int(random.random() < 0.5)
             new_config = config if label else invalidate(config)
             print("\t", new_config)
             (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
