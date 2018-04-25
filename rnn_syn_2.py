@@ -92,8 +92,23 @@ def build_end2end_model(n_images,
         tf.nn.sigmoid_cross_entropy_with_logits(
             labels=t_labels_l, logits=t_pred),
         name='loss')
+    tf.summary.scalar('loss', t_loss)
+    t_pred_bool = tf.cast(tf.greater(t_loss, 0.0), tf.float32)
+    t_correct_preds = tf.cast(tf.equal(t_pred_bool, t_labels_l),
+                              tf.float32)
+    t_partial_acc = tf.reduce_mean(t_correct_preds)
+    t_acc = tf.reduce_mean(
+        tf.cast(
+            tf.reduce_all(
+                tf.equal(t_correct_preds, 1.0),
+                axis=1
+            ), tf.float32))
+    tf.summary.scalar('partial_accuracy', t_partial_acc)
+    tf.summary.scalar('accuracy', t_acc)
+    summary_op = tf.summary.merge_all()
     return (t_features_raw, t_labels, t_features_raw_l, t_labels_l, t_msg,
-            t_pred, t_loss, t_features_toplevel_enc, t_features_toplevel_dec)
+            t_pred, t_loss, t_features_toplevel_enc, t_features_toplevel_dec,
+            summary_op)
 
 
 if __name__ == '__main__':
@@ -105,6 +120,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--max_images', type=int, default=20, help='Maximum number of images')
     parser.add_argument('--n_batches', type=int, default=1000)
+    parser.add_argument('--log_dir', default='./logs/')
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--n_cpu', type=int, default=12)
     parser.add_argument(
@@ -115,15 +131,17 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l = build_end2end_model(
+    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l, summary_op = build_end2end_model(
         args.max_images)
 
-    optimizer = tf.train.AdamOptimizer(0.001)
+    optimizer = tf.train.AdamOptimizer()
     o_train = optimizer.minimize(t_loss)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     session = tf.Session(config=config)
     session.run(tf.global_variables_initializer())
+
+    writer = tf.summary.FileWriter(args.log_dir, graph=tf.get_default_graph())
 
     # Init pool here
     pool = mp.Pool(args.n_cpu)
@@ -139,19 +157,20 @@ if __name__ == '__main__':
         # Shuffle images for listener
         feat_lis, lab_lis = shuffle_envs_labels(feat_spk, lab_spk)
 
-        batch_loss, preds, _ = session.run(
-            [t_loss, t_pred, o_train], {
+        batch_loss, preds, _, summary = session.run(
+            [t_loss, t_pred, o_train, summary_op], {
                 t_feat_spk: feat_spk,
                 t_lab_spk: lab_spk,
                 t_feat_lis: feat_lis,
                 t_lab_lis: lab_lis
             })
+        writer.add_summary(summary, batch_i)
 
         match = (preds > 0) == lab_lis
-        hits = np.all(match, axis=1).sum()
-        total = len(match)
-        print("Batch {}: train accuracy: {} loss: {}".format(
-            batch_i, hits / total, batch_loss))
+        match_acc = np.mean(match)
+        hits = np.all(match, axis=1).mean()
+        print("Batch {}: overall acc: {:.4f} hits only: {:.4f} loss: {:.4f}".format(
+            batch_i, match_acc, hits, batch_loss))
 
     pool.close()
     pool.join()
