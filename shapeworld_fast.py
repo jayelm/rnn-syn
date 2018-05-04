@@ -453,7 +453,7 @@ def generate(n,
              pool=None,
              do_mp=True,
              verbose=False):
-    if do_mp and pool is not None:
+    if not do_mp and pool is not None:
         raise ValueError("Can't specify pool if do_mp=True")
     if do_mp:
         pool_was_none = False
