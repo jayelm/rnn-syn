@@ -24,6 +24,9 @@ BRUSHES = {c: aggdraw.Brush(c) for c in COLORS}
 PENS = {c: aggdraw.Pen(c) for c in COLORS}
 
 
+MAX_PLACEMENT_ATTEMPTS = 5
+
+
 class ShapeSpec(Enum):
     SHAPE = 0
     COLOR = 1
@@ -260,9 +263,8 @@ def add_shape_from_spec(spec,
                         relation,
                         relation_dir,
                         shapes=None,
-                        attempt=1,
-                        max_attempts=3):
-    if attempt > max_attempts:
+                        attempt=1):
+    if attempt > MAX_PLACEMENT_ATTEMPTS:
         return None
     color, shape_ = spec
     if shape_ is None:
@@ -277,8 +279,7 @@ def add_shape_from_spec(spec,
                     relation,
                     relation_dir,
                     shapes=shapes,
-                    attempt=attempt + 1,
-                    max_attempts=max_attempts)
+                    attempt=attempt + 1)
         shapes.append(shape)
         return shape
     return shape
@@ -408,14 +409,26 @@ def generate_image(mp_args):
     imgs = np.zeros((wpi, 64, 64, 3), dtype=np.uint8)
     labels = np.zeros((wpi, ), dtype=np.uint8)
     config = random_config()
-    for wpi_ in range(wpi):
-        label = int(random.random() < correct)
+    # Minimum of 2 correct worlds/2 distractors
+    n_target = 2
+    n_distract = 2
+    idx_rand = list(range(wpi))
+    random.shuffle(idx_rand)
+    for w_idx in idx_rand:
+        if n_target > 0:
+            label = 1
+            n_target -= 1
+        elif n_distract > 0:
+            label = 0
+            n_distract -= 1
+        else:
+            label = (random.random() < correct)
         new_config = config if label else invalidate(config)
         (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
         s2 = add_shape_from_spec(ss2, relation, relation_dir)
 
         attempts = 0
-        while attempts < 5:
+        while attempts < MAX_PLACEMENT_ATTEMPTS:
             # TODO: Support extra shapes
             s1 = add_shape_rel(ss1, s2, relation, relation_dir)
             if not s2.intersects(s1):
@@ -427,8 +440,8 @@ def generate_image(mp_args):
         # Create image and draw shapes
         img = I()
         img.draw_shapes([s1, s2])
-        imgs[wpi_] = img.array()
-        labels[wpi_] = label
+        imgs[w_idx] = img.array()
+        labels[w_idx] = label
     return imgs, labels, config
 
 
@@ -438,13 +451,22 @@ def generate(n,
              float_type=False,
              n_cpu=None,
              pool=None,
+             do_mp=True,
              verbose=False):
-    pool_was_none = False
-    if pool is None:
-        pool_was_none = True
-        if n_cpu is None:
-            n_cpu = mp.cpu_count()
-        pool = mp.Pool(n_cpu)
+    if do_mp and pool is not None:
+        raise ValueError("Can't specify pool if do_mp=True")
+    if do_mp:
+        pool_was_none = False
+        if pool is None:
+            pool_was_none = True
+            if n_cpu is None:
+                n_cpu = mp.cpu_count()
+            pool = mp.Pool(n_cpu)
+
+    if wpi == 4:
+        print("Warning: wpi == 4, min targets/distractors both 2, no variance")
+    else:
+        assert wpi > 4, "Too few wpi"
 
     all_imgs = np.zeros((n, wpi, 64, 64, 3), dtype=np.uint8)
     all_labels = np.zeros((n, wpi), dtype=np.uint8)
@@ -452,7 +474,10 @@ def generate(n,
 
     mp_args = [(wpi, correct) for _ in range(n)]
 
-    gen_iter = enumerate(pool.imap_unordered(generate_image, mp_args))
+    if do_mp:
+        gen_iter = enumerate(pool.imap_unordered(generate_image, mp_args))
+    else:
+        gen_iter = enumerate(map(generate_image, mp_args))
     if verbose:
         gen_iter = tqdm(gen_iter, total=n)
     for i, (imgs, labels, config) in gen_iter:
@@ -460,7 +485,7 @@ def generate(n,
         all_labels[i, ] = labels
         configs.append(config)
 
-    if pool_was_none:  # Remember to close the pool
+    if do_mp and pool_was_none:  # Remember to close the pool
         pool.close()
         pool.join()
 
@@ -529,10 +554,13 @@ if __name__ == '__main__':
         '--wpi', type=int, default=10, help='Worlds per instance')
     parser.add_argument(
         '--correct', type=float, default=0.5, help='Correct proportion')
+    parser.add_argument(
+        '--no_mp', action='store_true', help='Don\'t use multiprocessing')
 
     args = parser.parse_args()
 
     imgs, labels, configs = generate(
-        args.n, args.wpi, args.correct, verbose=True)
+        args.n, args.wpi, args.correct, verbose=True,
+        do_mp=not args.no_mp)
 
     save_images('./test/', imgs, labels, configs)
