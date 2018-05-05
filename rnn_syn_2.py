@@ -8,6 +8,8 @@ import shapeworld_fast as sf
 import numpy as np
 import random
 import multiprocessing as mp
+import time
+import os
 
 
 def shuffle_envs_labels(envs, labels):
@@ -93,18 +95,6 @@ def build_end2end_model(n_images,
             labels=t_labels_l, logits=t_pred),
         name='loss')
     tf.summary.scalar('loss', t_loss)
-    t_pred_bool = tf.cast(tf.greater(t_loss, 0.0), tf.float32)
-    t_correct_preds = tf.cast(tf.equal(t_pred_bool, t_labels_l),
-                              tf.float32)
-    t_partial_acc = tf.reduce_mean(t_correct_preds)
-    t_acc = tf.reduce_mean(
-        tf.cast(
-            tf.reduce_all(
-                tf.equal(t_correct_preds, 1.0),
-                axis=1
-            ), tf.float32))
-    tf.summary.scalar('partial_accuracy', t_partial_acc)
-    tf.summary.scalar('accuracy', t_acc)
     summary_op = tf.summary.merge_all()
     return (t_features_raw, t_labels, t_features_raw_l, t_labels_l, t_msg,
             t_pred, t_loss, t_features_toplevel_enc, t_features_toplevel_dec,
@@ -120,9 +110,11 @@ if __name__ == '__main__':
     parser.add_argument(
         '--max_images', type=int, default=20, help='Maximum number of images')
     parser.add_argument('--n_batches', type=int, default=1000)
-    parser.add_argument('--log_dir', default='./logs/')
+    now = time.strftime('%Y-%m-%d-%X', time.localtime())
+    parser.add_argument('--log_dir', default=os.path.join('./logs', now),
+                        help='Tensorboard log directory')
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--n_cpu', type=int, default=12)
+    parser.add_argument('--n_cpu', type=int, default=mp.cpu_count())
     parser.add_argument(
         '--correct_proportion',
         type=float,
@@ -164,13 +156,26 @@ if __name__ == '__main__':
                 t_feat_lis: feat_lis,
                 t_lab_lis: lab_lis
             })
-        writer.add_summary(summary, batch_i)
 
         match = (preds > 0) == lab_lis
         match_acc = np.mean(match)
         hits = np.all(match, axis=1).mean()
-        print("Batch {}: overall acc: {:.4f} hits only: {:.4f} loss: {:.4f}".format(
-            batch_i, match_acc, hits, batch_loss))
+        if batch_i % 10 == 0:
+            print("Batch {}: overall acc: {:.4f} hits only: {:.4f} loss: {:.4f}".format(
+                batch_i, match_acc, hits, batch_loss))
+
+        # Add summaries
+        partial_acc_summary = tf.Summary(value=[
+            tf.Summary.Value(tag='partial_acc',
+                             simple_value=match_acc)
+        ])
+        hits_summary = tf.Summary(value=[
+            tf.Summary.Value(tag='hits',
+                             simple_value=hits)
+        ])
+        writer.add_summary(partial_acc_summary, batch_i)
+        writer.add_summary(hits_summary, batch_i)
+        writer.add_summary(summary, batch_i)
 
     pool.close()
     pool.join()

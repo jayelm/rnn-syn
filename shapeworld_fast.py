@@ -404,7 +404,7 @@ def generate_image(mp_args):
     """
     Generate a single image
     """
-    wpi, correct = mp_args
+    wpi, correct, i = mp_args
     # Get shapes and relations
     imgs = np.zeros((wpi, 64, 64, 3), dtype=np.uint8)
     labels = np.zeros((wpi, ), dtype=np.uint8)
@@ -442,7 +442,7 @@ def generate_image(mp_args):
         img.draw_shapes([s1, s2])
         imgs[w_idx] = img.array()
         labels[w_idx] = label
-    return imgs, labels, config
+    return imgs, labels, config, i
 
 
 def generate(n,
@@ -472,15 +472,15 @@ def generate(n,
     all_labels = np.zeros((n, wpi), dtype=np.uint8)
     configs = []
 
-    mp_args = [(wpi, correct) for _ in range(n)]
+    mp_args = [(wpi, correct, i) for i in range(n)]
 
     if do_mp:
-        gen_iter = enumerate(pool.imap_unordered(generate_image, mp_args))
+        gen_iter = pool.imap_unordered(generate_image, mp_args)
     else:
-        gen_iter = enumerate(map(generate_image, mp_args))
+        gen_iter = map(generate_image, mp_args)
     if verbose:
         gen_iter = tqdm(gen_iter, total=n)
-    for i, (imgs, labels, config) in gen_iter:
+    for imgs, labels, config, i in gen_iter:
         all_imgs[i, ] = imgs
         all_labels[i, ] = labels
         configs.append(config)
