@@ -94,11 +94,10 @@ def build_end2end_model(n_images,
         tf.nn.sigmoid_cross_entropy_with_logits(
             labels=t_labels_l, logits=t_pred),
         name='loss')
-    tf.summary.scalar('loss', t_loss)
-    summary_op = tf.summary.merge_all()
+    loss_summary = tf.summary.scalar('loss', t_loss)
     return (t_features_raw, t_labels, t_features_raw_l, t_labels_l, t_msg,
             t_pred, t_loss, t_features_toplevel_enc, t_features_toplevel_dec,
-            summary_op)
+            loss_summary)
 
 
 if __name__ == '__main__':
@@ -123,7 +122,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l, summary_op = build_end2end_model(
+    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l, loss_summary_op = build_end2end_model(
         args.max_images)
 
     optimizer = tf.train.AdamOptimizer()
@@ -149,8 +148,8 @@ if __name__ == '__main__':
         # Shuffle images for listener
         feat_lis, lab_lis = shuffle_envs_labels(feat_spk, lab_spk)
 
-        batch_loss, preds, _, summary = session.run(
-            [t_loss, t_pred, o_train, summary_op], {
+        batch_loss, preds, _, loss_summary = session.run(
+            [t_loss, t_pred, o_train, loss_summary_op], {
                 t_feat_spk: feat_spk,
                 t_lab_spk: lab_spk,
                 t_feat_lis: feat_lis,
@@ -175,7 +174,7 @@ if __name__ == '__main__':
         ])
         writer.add_summary(partial_acc_summary, batch_i)
         writer.add_summary(hits_summary, batch_i)
-        writer.add_summary(summary, batch_i)
+        writer.add_summary(loss_summary, batch_i)
 
     pool.close()
     pool.join()
