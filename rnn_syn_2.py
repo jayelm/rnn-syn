@@ -10,6 +10,7 @@ import random
 import multiprocessing as mp
 import time
 import os
+from tensorflow.python import debug as tf_debug
 
 
 def shuffle_envs_labels(envs, labels):
@@ -30,7 +31,7 @@ def shuffle_envs_labels(envs, labels):
 
 def build_end2end_model(n_images,
                         image_dim=(64, 64, 3),
-                        net_arch=(256, 64, 1024),
+                        net_arch=(256, 64, 512),
                         rnncell=tf.contrib.rnn.GRUCell):
     """
     Return an encoder-decoder model that uses raw ShapeWorld images.
@@ -50,6 +51,7 @@ def build_end2end_model(n_images,
 
     t_features_toplevel_enc = net.convolve(t_features_raw, n_images,
                                            n_toplevel_conv, 'conv_speaker')
+    weights_summary_op = tf.summary.histogram('t_features_toplevel_enc', t_features_toplevel_enc)
 
     # Whether an image is the target
     t_labels = tf.placeholder(
@@ -92,12 +94,12 @@ def build_end2end_model(n_images,
         name='prediction')
     t_loss = tf.reduce_mean(
         tf.nn.sigmoid_cross_entropy_with_logits(
-            labels=t_labels_l, logits=t_pred),
+            labels=t_labels_l, logits=t_pred, name='xentropy'),
         name='loss')
     loss_summary = tf.summary.scalar('loss', t_loss)
     return (t_features_raw, t_labels, t_features_raw_l, t_labels_l, t_msg,
             t_pred, t_loss, t_features_toplevel_enc, t_features_toplevel_dec,
-            loss_summary)
+            loss_summary, weights_summary_op)
 
 
 if __name__ == '__main__':
@@ -114,6 +116,7 @@ if __name__ == '__main__':
                         help='Tensorboard log directory')
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--n_cpu', type=int, default=mp.cpu_count())
+    parser.add_argument('--debug', action='store_true')
     parser.add_argument(
         '--correct_proportion',
         type=float,
@@ -122,7 +125,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l, loss_summary_op = build_end2end_model(
+    t_feat_spk, t_lab_spk, t_feat_lis, t_lab_lis, t_msg, t_pred, t_loss, t_conv_s, t_conv_l, loss_summary_op, weights_summary_op = build_end2end_model(
         args.max_images)
 
     optimizer = tf.train.AdamOptimizer()
@@ -130,26 +133,28 @@ if __name__ == '__main__':
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     session = tf.Session(config=config)
+    if args.debug:
+        session = tf_debug.LocalCLIDebugWrapperSession(session, dump_root='/local/scratch/jlm95/tfdbg/')
     session.run(tf.global_variables_initializer())
 
     writer = tf.summary.FileWriter(args.log_dir, graph=tf.get_default_graph())
 
     # Init pool here
     pool = mp.Pool(args.n_cpu)
-
     for batch_i in range(args.n_batches):
         feat_spk, lab_spk, configs = sf.generate(
             args.batch_size,
             args.max_images,
             args.correct_proportion,
             float_type=True,
+            img_func=sf.generate_single,
             pool=pool)
 
         # Shuffle images for listener
         feat_lis, lab_lis = shuffle_envs_labels(feat_spk, lab_spk)
 
-        batch_loss, preds, _, loss_summary = session.run(
-            [t_loss, t_pred, o_train, loss_summary_op], {
+        batch_loss, preds, _, loss_summary, weights_summary = session.run(
+            [t_loss, t_pred, o_train, loss_summary_op, weights_summary_op], {
                 t_feat_spk: feat_spk,
                 t_lab_spk: lab_spk,
                 t_feat_lis: feat_lis,
@@ -175,6 +180,7 @@ if __name__ == '__main__':
         writer.add_summary(partial_acc_summary, batch_i)
         writer.add_summary(hits_summary, batch_i)
         writer.add_summary(loss_summary, batch_i)
+        writer.add_summary(weights_summary, batch_i)
 
     pool.close()
     pool.join()
