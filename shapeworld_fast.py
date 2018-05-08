@@ -479,7 +479,7 @@ def generate_single(mp_args):
     wpi, correct, i = mp_args
     imgs = np.zeros((wpi, 64, 64, 3), dtype=np.uint8)
     labels = np.zeros((wpi, ), dtype=np.uint8)
-    config = random_config_spatial()
+    config = random_config_single()
     n_target = 2
     n_distract = 2
     idx_rand = list(range(wpi))
