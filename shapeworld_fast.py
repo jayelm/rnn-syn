@@ -244,7 +244,13 @@ def random_shape_from_spec(spec):
     return (color, shape)
 
 
-def random_config():
+def random_config_single():
+    shape_spec = ShapeSpec(random.randrange(3))
+    shape = random_shape_from_spec(shape_spec)
+    return shape
+
+
+def random_config_spatial():
     # 0 -> only shape specified
     # 1 -> only color specified
     # 2 -> only both specified
@@ -253,7 +259,7 @@ def random_config():
     shape_1 = random_shape_from_spec(shape_1_spec)
     shape_2 = random_shape_from_spec(shape_2_spec)
     if shape_1 == shape_2:
-        return random_config()
+        return random_config_spatial()
     relation = random.randrange(2)
     relation_dir = random.randrange(2)
     return [shape_1, shape_2], None, relation, relation_dir
@@ -325,7 +331,7 @@ def new_shape(existing_shape):
     return new_s
 
 
-def invalidate(config):
+def invalidate_spatial(config):
     # Invalidate by randomly choosing one property to change:
     ((shape_1_color, shape_1_shape),
      (shape_2_color,
@@ -400,7 +406,7 @@ def fmt_config(config):
                                    s2_0_txt, s2_1_txt)
 
 
-def generate_image(mp_args):
+def generate_spatial(mp_args):
     """
     Generate a single image
     """
@@ -408,7 +414,7 @@ def generate_image(mp_args):
     # Get shapes and relations
     imgs = np.zeros((wpi, 64, 64, 3), dtype=np.uint8)
     labels = np.zeros((wpi, ), dtype=np.uint8)
-    config = random_config()
+    config = random_config_spatial()
     # Minimum of 2 correct worlds/2 distractors
     n_target = 2
     n_distract = 2
@@ -423,7 +429,7 @@ def generate_image(mp_args):
             n_distract -= 1
         else:
             label = (random.random() < correct)
-        new_config = config if label else invalidate(config)
+        new_config = config if label else invalidate_spatial(config)
         (ss1, ss2), extra_shape_specs, relation, relation_dir = new_config
         s2 = add_shape_from_spec(ss2, relation, relation_dir)
 
@@ -445,9 +451,67 @@ def generate_image(mp_args):
     return imgs, labels, config, i
 
 
+def invalidate_single(config):
+    color, shape_ = config
+    if shape_ is not None and color is not None:
+        # Sample random part to invalidate
+        # Here, we can invalidate shape, or invalidate color, OR invalidate both
+        part_to_invalidate = random.randrange(3)
+        if part_to_invalidate == 0:
+            return (new_color(color), shape_)
+        elif part_to_invalidate == 1:
+            return (color, new_shape(shape_))
+        elif part_to_invalidate == 2:
+            return (new_color(color), new_shape(shape_))
+        else:
+            raise RuntimeError
+    elif shape_ is not None:
+        assert color is None
+        return (None, new_shape(shape_))
+    elif color is not None:
+        assert shape_ is None
+        return (new_color(color), None)
+    else:
+        raise RuntimeError
+
+
+def generate_single(mp_args):
+    wpi, correct, i = mp_args
+    imgs = np.zeros((wpi, 64, 64, 3), dtype=np.uint8)
+    labels = np.zeros((wpi, ), dtype=np.uint8)
+    config = random_config_spatial()
+    n_target = 2
+    n_distract = 2
+    idx_rand = list(range(wpi))
+    random.shuffle(idx_rand)
+    for w_idx in idx_rand:
+        if n_target > 0:
+            label = 1
+            n_target -= 1
+        elif n_distract > 0:
+            label = 0
+            n_distract -= 1
+        else:
+            label = (random.random() < correct)
+        new_config = config if label else invalidate_single(config)
+
+        color, shape_ = new_config
+        if shape_ is None:
+            shape_ = random_shape()
+        shape = SHAPE_IMPLS[shape_](color=color)
+
+        # Create image and draw shape
+        img = I()
+        img.draw_shapes([shape])
+        imgs[w_idx] = img.array()
+        labels[w_idx] = label
+    return imgs, labels, config, i
+
+
 def generate(n,
              wpi,
              correct,
+             img_func=generate_spatial,
              float_type=False,
              n_cpu=None,
              pool=None,
@@ -475,9 +539,9 @@ def generate(n,
     mp_args = [(wpi, correct, i) for i in range(n)]
 
     if do_mp:
-        gen_iter = pool.imap_unordered(generate_image, mp_args)
+        gen_iter = pool.imap_unordered(img_func, mp_args)
     else:
-        gen_iter = map(generate_image, mp_args)
+        gen_iter = map(img_func, mp_args)
     if verbose:
         gen_iter = tqdm(gen_iter, total=n)
     for imgs, labels, config, i in gen_iter:
@@ -541,6 +605,12 @@ def save_images(dir, imgs, labels, configs):
     np.savez_compressed('test.npz', imgs=imgs, labels=labels)
 
 
+IMG_FUNCS = {
+    'single': generate_single,
+    'spatial': generate_spatial,
+}
+
+
 if __name__ == '__main__':
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
@@ -556,11 +626,15 @@ if __name__ == '__main__':
         '--correct', type=float, default=0.5, help='Correct proportion')
     parser.add_argument(
         '--no_mp', action='store_true', help='Don\'t use multiprocessing')
+    parser.add_argument(
+        '--type', choices=list(IMG_FUNCS.keys()), default='spatial',
+        help='What kind of images to generate')
 
     args = parser.parse_args()
 
     imgs, labels, configs = generate(
         args.n, args.wpi, args.correct, verbose=True,
+        img_func=IMG_FUNCS[args.type],
         do_mp=not args.no_mp)
 
     save_images('./test/', imgs, labels, configs)
