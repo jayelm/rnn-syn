@@ -15,3 +15,5 @@ data/*
 !data/components
 data/components/*
 !data/components/README.md
+
+logs/*

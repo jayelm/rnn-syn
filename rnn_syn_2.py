@@ -2,7 +2,7 @@
 RNN SYN 2: streamlined version
 """
 
-import net
+import net_2 as net
 import tensorflow as tf
 import shapeworld_fast as sf
 import numpy as np
@@ -117,6 +117,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--n_cpu', type=int, default=mp.cpu_count())
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--save', type=str, default=None,
+                        help='Model save path')
+    parser.add_argument('--type', choices=list(sf.IMG_FUNCS.keys()),
+                        default='single')
     parser.add_argument(
         '--correct_proportion',
         type=float,
@@ -130,9 +134,7 @@ if __name__ == '__main__':
 
     optimizer = tf.train.AdamOptimizer()
     o_train = optimizer.minimize(t_loss)
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    session = tf.Session(config=config)
+    session = tf.Session()
     if args.debug:
         session = tf_debug.LocalCLIDebugWrapperSession(session, dump_root='/local/scratch/jlm95/tfdbg/')
     session.run(tf.global_variables_initializer())
@@ -142,19 +144,37 @@ if __name__ == '__main__':
     # Init pool here
     pool = mp.Pool(args.n_cpu)
     for batch_i in range(args.n_batches):
-        feat_spk, lab_spk, configs = sf.generate(
-            args.batch_size,
-            args.max_images,
-            args.correct_proportion,
-            float_type=True,
-            img_func=sf.generate_single,
-            pool=pool)
+        if batch_i > 15000:
+            if random.random() < 0.75:
+                feat_spk, lab_spk, configs = sf.generate(
+                    args.batch_size,
+                    args.max_images,
+                    args.correct_proportion,
+                    float_type=True,
+                    img_func=sf.generate_spatial,
+                    pool=pool)
+            else:
+                feat_spk, lab_spk, configs = sf.generate(
+                    args.batch_size,
+                    args.max_images,
+                    args.correct_proportion,
+                    float_type=True,
+                    img_func=sf.generate_single,
+                    pool=pool)
+        else:
+            feat_spk, lab_spk, configs = sf.generate(
+                args.batch_size,
+                args.max_images,
+                args.correct_proportion,
+                float_type=True,
+                img_func=sf.IMG_FUNCS[args.type],
+                pool=pool)
 
         # Shuffle images for listener
         feat_lis, lab_lis = shuffle_envs_labels(feat_spk, lab_spk)
 
         batch_loss, preds, _, loss_summary, weights_summary = session.run(
-            [t_loss, t_pred, o_train, loss_summary_op, weights_summary_op], {
+           [t_loss, t_pred, o_train, loss_summary_op, weights_summary_op], {
                 t_feat_spk: feat_spk,
                 t_lab_spk: lab_spk,
                 t_feat_lis: feat_lis,
@@ -181,6 +201,10 @@ if __name__ == '__main__':
         writer.add_summary(hits_summary, batch_i)
         writer.add_summary(loss_summary, batch_i)
         writer.add_summary(weights_summary, batch_i)
+
+    if args.save is not None:
+        saver = tf.train.Saver()
+        saver.save(session, args.save)
 
     pool.close()
     pool.join()
